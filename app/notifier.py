@@ -7,7 +7,9 @@ winotify を使用してデスクトップ通知を表示する。
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -22,52 +24,178 @@ from app.i18n import t
 
 logger = logging.getLogger(__name__)
 
+# --- Start Menu ショートカット登録（AppUserModelID） ----------------------
+
+_SHORTCUT_REGISTERED = False
+
+
+def _ensure_start_menu_shortcut(app_id: str) -> None:
+    """トースト通知用のスタートメニューショートカットを作成する。
+
+    Windows 11 (build 26100+) ではトースト通知のポップアップバナーを表示するには
+    AppUserModelID が設定されたスタートメニューショートカット (.lnk) が必要。
+    未登録の場合のみ作成し、以降はスキップする。
+    """
+    global _SHORTCUT_REGISTERED  # noqa: PLW0603
+    if _SHORTCUT_REGISTERED:
+        return
+
+    start_menu = Path(
+        os.environ.get("APPDATA", ""),
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+    )
+    if not start_menu.exists():
+        logger.debug("Start Menu フォルダが見つかりません: %s", start_menu)
+        _SHORTCUT_REGISTERED = True
+        return
+
+    lnk_path = start_menu / f"{app_id}.lnk"
+    if lnk_path.exists():
+        _SHORTCUT_REGISTERED = True
+        return
+
+    # python.exe のパスと icons
+    python_exe = sys.executable
+    project_root = Path(__file__).resolve().parent.parent
+    icon_path = project_root / "assets" / "icon_normal.ico"
+
+    # C# interop で AppUserModelID を設定するショートカットを作成
+    icon_arg = str(icon_path) if icon_path.exists() else ""
+    ps_script = _PS_CREATE_SHORTCUT_WITH_AUMID.format(
+        lnk_path=str(lnk_path),
+        target_path=str(python_exe),
+        description=app_id,
+        icon_location=icon_arg,
+        aumid=app_id,
+    )
+
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            startupinfo=si,
+        )
+        if result.returncode == 0:
+            logger.info("Start Menu ショートカットを作成: %s", lnk_path)
+        else:
+            logger.warning(
+                "Start Menu ショートカット作成失敗 (rc=%d): %s",
+                result.returncode,
+                result.stderr[:300] if result.stderr else "",
+            )
+    except Exception:
+        logger.debug("Start Menu ショートカット作成エラー", exc_info=True)
+
+    _SHORTCUT_REGISTERED = True
+
+
+# PowerShell スクリプト: ショートカットを作成し AppUserModelID を設定する
+_PS_CREATE_SHORTCUT_WITH_AUMID = r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class AumidHelper {{
+    [DllImport("shell32.dll", SetLastError = true)]
+    static extern int SHGetPropertyStoreFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+        IntPtr pbc, int flags, ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out object ppv);
+    public static void SetAumid(string lnkPath, string aumid) {{
+        Guid IID = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        object store;
+        int hr = SHGetPropertyStoreFromParsingName(lnkPath, IntPtr.Zero, 2, ref IID, out store);
+        if (hr != 0) throw new COMException("SHGetPropertyStoreFromParsingName", hr);
+        var key = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
+        var pv = new PROPVARIANT(); pv.vt = 31; pv.pwszVal = Marshal.StringToCoTaskMemUni(aumid);
+        var ps = (IPropertyStore)store;
+        ps.SetValue(ref key, ref pv);
+        ps.Commit();
+        Marshal.FreeCoTaskMem(pv.pwszVal);
+    }}
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {{
+        int GetCount(out uint c);
+        int GetAt(uint i, out PROPERTYKEY k);
+        int GetValue(ref PROPERTYKEY k, out PROPVARIANT v);
+        int SetValue(ref PROPERTYKEY k, ref PROPVARIANT v);
+        int Commit();
+    }}
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PROPERTYKEY {{
+        public Guid fmtid; public uint pid;
+        public PROPERTYKEY(Guid f, uint p) {{ fmtid = f; pid = p; }}
+    }}
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PROPVARIANT {{
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pwszVal;
+    }}
+}}
+'@ -ErrorAction Stop
+
+$ws = New-Object -ComObject WScript.Shell
+$sc = $ws.CreateShortcut("{lnk_path}")
+$sc.TargetPath = "{target_path}"
+$sc.Description = "{description}"
+$sc.WindowStyle = 7
+$icon = "{icon_location}"
+if ($icon) {{ $sc.IconLocation = $icon }}
+$sc.Save()
+[AumidHelper]::SetAumid("{lnk_path}", "{aumid}")
+"""
+
 
 def _get_app_id() -> str:
     """通知用アプリ ID を返す。"""
     return t("app.name")
 
 
+def _clear_notification_history(app_id: str) -> None:
+    """アクションセンターの通知履歴をクリアする。
+
+    History.Clear() を事前に実行することで、同一 Tag + Group の通知が
+    残っていてもサイレント更新にならず、ポップアップバナーが表示される。
+    """
+    ps_clear = (
+        '[Windows.UI.Notifications.ToastNotificationManager,'
+        ' Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;'
+        ' [Windows.UI.Notifications.ToastNotificationManager]'
+        '::History.Clear("{}")'.format(app_id)
+    )
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    try:
+        subprocess.run(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", ps_clear],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            startupinfo=si,
+            timeout=10,
+        )
+    except Exception:
+        logger.debug("History.Clear 実行エラー（無視）", exc_info=True)
+
+
 def _toast_show_with_clear(toast: Notification) -> None:
     """トースト通知を表示する（旧通知をクリアしてポップアップを確実に表示）。
 
-    同一 Tag + Group の通知がアクションセンターに残っている場合、
-    Windows は「サイレント更新」を行いバナーポップアップが出ない。
-    Show() の直前に History.Clear() を実行することで常にポップアップを表示する。
+    1. Start Menu ショートカットを登録（初回のみ）
+    2. History.Clear() で旧通知をクリア
+    3. toast.show() でポップアップ表示
     """
-    # winotify show() と同等の前処理
-    if toast.actions:
-        toast.actions = "\n".join(toast.actions)
-    else:
-        toast.actions = ""
-    if toast.audio == audio.Silent:
-        toast.audio = '<audio silent="true" />'
-    if toast.launch:
-        toast.launch = 'activationType="protocol" launch="{}"'.format(toast.launch)
-
-    from winotify import TEMPLATE
-
-    script = TEMPLATE.format(**toast.__dict__)
-
-    # $Notifier.Show($Toast) の前に History.Clear() を注入
-    clear_cmd = (
-        "[Windows.UI.Notifications.ToastNotificationManager]"
-        '::History.Clear("{app_id}")\n'.format(app_id=toast.app_id)
-    )
-    script = script.replace(
-        "$Notifier.Show($Toast);",
-        clear_cmd + "$Notifier.Show($Toast);",
-    )
-
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    subprocess.Popen(
-        ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", script],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        startupinfo=si,
-    )
+    _ensure_start_menu_shortcut(toast.app_id)
+    _clear_notification_history(toast.app_id)
+    toast.show()
 
 
 def _show_notification(
