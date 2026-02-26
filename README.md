@@ -2,7 +2,7 @@
 
 > **[日本語版はこちら / Japanese version below](#日本語)**
 
-Many users today save knowledge locally as Markdown files — research results from LLM conversations, task management notes, learning logs, and more. This **Windows-only** desktop application leverages those local Markdown files as personal context: it periodically reads them from specified folders, retrieves and summarizes the latest information tailored to your interests, and generates review quizzes to reinforce learning — all powered by the **GitHub Copilot SDK**.
+Many users save knowledge locally as Markdown files — research results from LLM conversations, task management notes, learning logs, and more. This **Windows-only** desktop application leverages those local Markdown files as personal context: it periodically reads them from specified folders, retrieves and summarizes the latest information tailored to your interests, and generates review quizzes to reinforce learning — all powered by the **GitHub Copilot SDK**.
 
 ## Features
 
@@ -251,7 +251,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 # パーソナル AI デイリーブリーフィング Agent
 
-近年、LLM を使って調べた情報の保存、タスク管理、学習メモなど、さまざまなナレッジを Markdown ファイルとしてローカルに蓄積するユーザーが増えています。本アプリケーションはそうした**ローカルの Markdown ファイルを個人のコンテキスト**として活用し、指定フォルダから定期的に読み込み、GitHub Copilot SDK を用いてユーザーの関心に合った最新情報の取得・要約やクイズによる学習強化を行い、結果を Markdown ファイルとして出力する **Windows 専用** デスクトップアプリケーションです。
+LLM を使った調査結果の保存、タスク管理、学習メモなど、日常的にさまざまなナレッジを Markdown ファイルとしてローカルに蓄積しているユーザーは少なくありません。本アプリケーションはそうした**ローカルの Markdown ファイルを個人のコンテキスト**として活用し、指定フォルダから定期的に読み込み、GitHub Copilot SDK を用いてユーザーの関心に合った最新情報の取得・要約やクイズによる学習強化を行い、結果を Markdown ファイルとして出力する **Windows 専用** デスクトップアプリケーションです。
 
 ## 主な機能
 
