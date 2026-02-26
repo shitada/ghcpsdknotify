@@ -2,7 +2,7 @@
 
 > **[日本語版はこちら / Japanese version below](#日本語)**
 
-A **Windows-only** desktop application that periodically reads Markdown files from specified folders, retrieves and summarizes the latest information, and generates review quizzes — all powered by the **GitHub Copilot SDK**.
+Many users today save knowledge locally as Markdown files — research results from LLM conversations, task management notes, learning logs, and more. This **Windows-only** desktop application leverages those local Markdown files as personal context: it periodically reads them from specified folders, retrieves and summarizes the latest information tailored to your interests, and generates review quizzes to reinforce learning — all powered by the **GitHub Copilot SDK**.
 
 ## Features
 
@@ -14,6 +14,61 @@ A **Windows-only** desktop application that periodically reads Markdown files fr
 - **MD Viewer**: HTML rendering via `tkinterweb` with quiz answer form
 - **Internal Knowledge Search**: WorkIQ MCP server integration (optional)
 - **Bilingual UI**: Full Japanese / English support — switch in Settings
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph LOCAL_ENV ["🖥️ User's PC (Windows)"]
+        direction TB
+
+        subgraph INPUT ["📂 Input"]
+            MD["📝 Local Markdown Files"]
+        end
+
+        subgraph PIPELINE ["⚙️ Processing Pipeline"]
+            direction TB
+            FS["Folder Scanner"] --> SEL["File Selector\n(weighted random +\ndiscovery rotation)"]
+            SEL --> PB["Prompt Builder\n(system + user prompts)"]
+        end
+
+        subgraph SDK_LAYER ["🤖 GitHub Copilot SDK"]
+            direction TB
+            CLIENT["CopilotClientWrapper\n(retry + timeout)"]
+        end
+
+        subgraph OUTPUT ["📤 Output & UX"]
+            direction TB
+            OW["Output Writer"] --> MDF["📄 Markdown File"]
+            OW --> TOAST["🔔 Toast Notification"]
+            TOAST --> VIEWER["🌐 HTML Viewer\n(quiz answer form)"]
+        end
+
+        subgraph QUIZ ["🎯 Quiz & Review"]
+            direction TB
+            SCORE["Quiz Scoring\n(separate LLM call)"] --> SR["Spaced Repetition\n(state.json)"]
+        end
+
+        MD --> FS
+        PB --> CLIENT
+        CLIENT --> OW
+        VIEWER -- "user answers" --> SCORE
+    end
+
+    subgraph EXTERNAL ["☁️ External (via gh copilot CLI only)"]
+        BING["🔍 Bing Web Search\n(SDK built-in)"]
+        MCP["🏢 WorkIQ MCP\n(stdio, optional)"]
+    end
+
+    CLIENT -- "Feature A" --> BING
+    CLIENT -- "Feature A" --> MCP
+    CLIENT -. "Feature B\n(no tools)" .-> CLIENT
+
+    style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
+    style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
+    style SDK_LAYER fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+    style QUIZ fill:#fce4ec,stroke:#e91e63,stroke-width:1px
+```
 
 ## Prerequisites
 
@@ -176,6 +231,17 @@ ghcpsdknotify/
 └── README.md
 ```
 
+## Responsible AI
+
+This application is designed with the following data-privacy and security principles:
+
+- **No direct external communication**: The app never opens its own network connections to external services. All LLM interactions go exclusively through the **GitHub Copilot CLI (`gh copilot`)** via the Copilot SDK, inheriting its authentication, encryption, and data-handling policies.
+- **Local-only file access**: Markdown files are read from user-configured local folders. Files are never uploaded — only their text content is included in prompts sent through the SDK.
+- **Read-only / create-only**: The agent only **reads** existing files and **creates** new output files (briefings, quiz results). It never modifies or deletes any existing user files.
+- **No PII collection**: The agent does not collect, store, or transmit personally identifiable information. Only file paths and note content appear in prompts.
+- **Transparent local storage**: Quiz scoring results and spaced-repetition state are stored locally in `settings/state.json`. Users can inspect and delete this data at any time.
+- **Full user control**: All features (scheduling, WorkIQ integration, language) are configurable via `settings/config.yaml` or the built-in Settings UI. Users can disable any feature or adjust schedules freely.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
@@ -186,7 +252,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 # パーソナル AI デイリーブリーフィング Agent
 
-指定フォルダ配下の Markdown ファイル群を定期的に読み込み、GitHub Copilot SDK を用いて最新情報の取得・要約とクイズによる復習を行い、結果を Markdown ファイルとして出力する **Windows 専用** デスクトップアプリケーションです。
+近年、LLM を使って調べた情報の保存、タスク管理、学習メモなど、さまざまなナレッジを Markdown ファイルとしてローカルに蓄積するユーザーが増えています。本アプリケーションはそうした**ローカルの Markdown ファイルを個人のコンテキスト**として活用し、指定フォルダから定期的に読み込み、GitHub Copilot SDK を用いてユーザーの関心に合った最新情報の取得・要約やクイズによる学習強化を行い、結果を Markdown ファイルとして出力する **Windows 専用** デスクトップアプリケーションです。
 
 ## 主な機能
 
@@ -198,6 +264,61 @@ MIT License — see [LICENSE](LICENSE) for details.
 - **MD プレビューア**: `tkinterweb` による HTML レンダリング + クイズ回答フォーム
 - **WorkIQ MCP 連携**: 社内ナレッジ検索（オプション）
 - **多言語対応**: 日本語 / 英語 — 設定画面で切替
+
+## アーキテクチャ
+
+```mermaid
+flowchart LR
+    subgraph LOCAL_ENV ["🖥️ ユーザーの PC (Windows)"]
+        direction TB
+
+        subgraph INPUT ["📂 入力"]
+            MD["📝 ローカル Markdown ファイル"]
+        end
+
+        subgraph PIPELINE ["⚙️ 処理パイプライン"]
+            direction TB
+            FS["フォルダスキャナ"] --> SEL["ファイルセレクタ\n(重み付きランダム +\nディスカバリーローテーション)"]
+            SEL --> PB["プロンプトビルダー\n(system + user プロンプト)"]
+        end
+
+        subgraph SDK_LAYER ["🤖 GitHub Copilot SDK"]
+            direction TB
+            CLIENT["CopilotClientWrapper\n(リトライ + タイムアウト)"]
+        end
+
+        subgraph OUTPUT ["📤 出力 & UX"]
+            direction TB
+            OW["出力ライター"] --> MDF["📄 Markdown ファイル"]
+            OW --> TOAST["🔔 トースト通知"]
+            TOAST --> VIEWER["🌐 HTML ビューア\n(クイズ回答フォーム)"]
+        end
+
+        subgraph QUIZ ["🎯 クイズ & 復習"]
+            direction TB
+            SCORE["クイズ採点\n(別 LLM 呼び出し)"] --> SR["間隔反復\n(state.json)"]
+        end
+
+        MD --> FS
+        PB --> CLIENT
+        CLIENT --> OW
+        VIEWER -- "ユーザー回答" --> SCORE
+    end
+
+    subgraph EXTERNAL ["☁️ 外部 (gh copilot CLI 経由のみ)"]
+        BING["🔍 Bing Web 検索\n(SDK 組み込み)"]
+        MCP["🏢 WorkIQ MCP\n(stdio, オプション)"]
+    end
+
+    CLIENT -- "機能 A" --> BING
+    CLIENT -- "機能 A" --> MCP
+    CLIENT -. "機能 B\n(ツールなし)" .-> CLIENT
+
+    style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
+    style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
+    style SDK_LAYER fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+    style QUIZ fill:#fce4ec,stroke:#e91e63,stroke-width:1px
+```
 
 ## 前提条件
 
@@ -324,6 +445,17 @@ log_level: INFO
 - **設定**: スケジュール・フォルダ・通知・言語の変更ダイアログ
 - **ログを開く**: `logs/app.log` を OS デフォルトエディタで表示
 - **終了**: アプリを終了
+
+## Responsible AI（責任ある AI）
+
+本アプリケーションは、以下のデータプライバシー・セキュリティ原則に基づいて設計されています:
+
+- **外部との直接通信なし**: アプリは独自のネットワーク接続を一切行いません。すべての LLM 通信は **GitHub Copilot CLI (`gh copilot`)** を経由する Copilot SDK のみを使用し、認証・暗号化・データ保護ポリシーをそのまま継承します。
+- **ローカルファイルのみ読み取り**: Markdown ファイルはユーザーが設定したローカルフォルダから読み込まれます。ファイル自体は一切送信されず、テキスト内容のみが SDK 経由のプロンプトに含まれます。
+- **読み取り専用・新規作成のみ**: 既存ファイルの**読み取り**と新規出力ファイル（ブリーフィング・クイズ結果）の**作成**のみを行います。既存のユーザーファイルを変更・削除することは一切ありません。
+- **PII 不収集**: 個人を特定できる情報の収集・保存・送信は行いません。プロンプトに含まれるのはファイルパスとノート内容のみです。
+- **透過的なローカル保存**: クイズ採点結果と間隔反復の状態は `settings/state.json` にローカル保存されます。ユーザーはいつでもデータを確認・削除できます。
+- **ユーザーによる完全制御**: すべての機能（スケジュール・WorkIQ 連携・言語）は `settings/config.yaml` または設定 UI から自由に変更・無効化できます。
 
 ## ライセンス
 
