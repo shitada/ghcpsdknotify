@@ -37,9 +37,12 @@ flowchart TB
             OW["Output Writer"]
             MDF["📄 Markdown"]
             TOAST["🔔 Toast"]
-            VIEWER["🌐 HTML Viewer"]
+            VIEWER_A["🌐 HTML Viewer\n(read-only)"]
+            VIEWER_B["🌐 HTML Viewer\n(quiz form)"]
             OW --> MDF
-            OW --> TOAST --> VIEWER
+            OW --> TOAST
+            TOAST -- "Feature A" --> VIEWER_A
+            TOAST -- "Feature B" --> VIEWER_B
         end
 
         subgraph QUIZ ["🎯 Quiz & Spaced Repetition"]
@@ -56,12 +59,10 @@ flowchart TB
 
     MD --> FS
     PB --> CLIENT
-    CLIENT --> OW
-    VIEWER -. "user answers" .-> SCORE
-
-    CLIENT -- "Feature A" --> BING
+    CLIENT -- "Feature A\n(uses tools)" --> BING
     CLIENT -- "Feature A" --> MCP
-    CLIENT -. "Feature B (no tools)" .-> CLIENT
+    CLIENT -- "Feature A & B" --> OW
+    VIEWER_B -. "user answers" .-> SCORE
 
     style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
     style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
@@ -286,9 +287,12 @@ flowchart TB
             OW["出力ライター"]
             MDF["📄 Markdown"]
             TOAST["🔔 トースト"]
-            VIEWER["🌐 HTML ビューア"]
+            VIEWER_A["🌐 HTML ビューア\n(閲覧のみ)"]
+            VIEWER_B["🌐 HTML ビューア\n(クイズフォーム)"]
             OW --> MDF
-            OW --> TOAST --> VIEWER
+            OW --> TOAST
+            TOAST -- "機能 A" --> VIEWER_A
+            TOAST -- "機能 B" --> VIEWER_B
         end
 
         subgraph QUIZ ["🎯 クイズ & 間隔反復"]
@@ -305,12 +309,10 @@ flowchart TB
 
     MD --> FS
     PB --> CLIENT
-    CLIENT --> OW
-    VIEWER -. "ユーザー回答" .-> SCORE
-
-    CLIENT -- "機能 A" --> BING
+    CLIENT -- "機能 A\n(ツール使用)" --> BING
     CLIENT -- "機能 A" --> MCP
-    CLIENT -. "機能 B (ツールなし)" .-> CLIENT
+    CLIENT -- "機能 A & B" --> OW
+    VIEWER_B -. "ユーザー回答" .-> SCORE
 
     style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
     style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
