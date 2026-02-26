@@ -18,51 +18,50 @@ Many users today save knowledge locally as Markdown files — research results f
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph LOCAL_ENV ["🖥️ User's PC (Windows)"]
-        direction TB
-
-        subgraph INPUT ["📂 Input"]
-            MD["📝 Local Markdown Files"]
-        end
+flowchart TB
+    subgraph LOCAL_ENV ["🖥️ User's PC — Windows"]
+        MD["📝 Local Markdown Files"]
 
         subgraph PIPELINE ["⚙️ Processing Pipeline"]
-            direction TB
-            FS["Folder Scanner"] --> SEL["File Selector\n(weighted random +\ndiscovery rotation)"]
-            SEL --> PB["Prompt Builder\n(system + user prompts)"]
+            FS["Folder Scanner"]
+            SEL["File Selector\n(weighted random)"]
+            PB["Prompt Builder"]
+            FS --> SEL --> PB
         end
 
         subgraph SDK_LAYER ["🤖 GitHub Copilot SDK"]
-            direction TB
             CLIENT["CopilotClientWrapper\n(retry + timeout)"]
         end
 
-        subgraph OUTPUT ["📤 Output & UX"]
-            direction TB
-            OW["Output Writer"] --> MDF["📄 Markdown File"]
-            OW --> TOAST["🔔 Toast Notification"]
-            TOAST --> VIEWER["🌐 HTML Viewer\n(quiz answer form)"]
+        subgraph OUTPUT ["📤 Output & Notification"]
+            OW["Output Writer"]
+            MDF["📄 Markdown"]
+            TOAST["🔔 Toast"]
+            VIEWER["🌐 HTML Viewer"]
+            OW --> MDF
+            OW --> TOAST --> VIEWER
         end
 
-        subgraph QUIZ ["🎯 Quiz & Review"]
-            direction TB
-            SCORE["Quiz Scoring\n(separate LLM call)"] --> SR["Spaced Repetition\n(state.json)"]
+        subgraph QUIZ ["🎯 Quiz & Spaced Repetition"]
+            SCORE["Quiz Scoring\n(separate LLM call)"]
+            SR["Spaced Repetition\n(state.json)"]
+            SCORE --> SR
         end
-
-        MD --> FS
-        PB --> CLIENT
-        CLIENT --> OW
-        VIEWER -- "user answers" --> SCORE
     end
 
-    subgraph EXTERNAL ["☁️ External (via gh copilot CLI only)"]
-        BING["🔍 Bing Web Search\n(SDK built-in)"]
-        MCP["🏢 WorkIQ MCP\n(stdio, optional)"]
+    subgraph EXTERNAL ["☁️ External — via SDK only"]
+        BING["🔍 Bing Web Search"]
+        MCP["🏢 WorkIQ MCP"]
     end
+
+    MD --> FS
+    PB --> CLIENT
+    CLIENT --> OW
+    VIEWER -. "user answers" .-> SCORE
 
     CLIENT -- "Feature A" --> BING
     CLIENT -- "Feature A" --> MCP
-    CLIENT -. "Feature B\n(no tools)" .-> CLIENT
+    CLIENT -. "Feature B (no tools)" .-> CLIENT
 
     style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
     style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
@@ -268,51 +267,50 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## アーキテクチャ
 
 ```mermaid
-flowchart LR
-    subgraph LOCAL_ENV ["🖥️ ユーザーの PC (Windows)"]
-        direction TB
-
-        subgraph INPUT ["📂 入力"]
-            MD["📝 ローカル Markdown ファイル"]
-        end
+flowchart TB
+    subgraph LOCAL_ENV ["🖥️ ユーザーの PC — Windows"]
+        MD["📝 ローカル Markdown ファイル"]
 
         subgraph PIPELINE ["⚙️ 処理パイプライン"]
-            direction TB
-            FS["フォルダスキャナ"] --> SEL["ファイルセレクタ\n(重み付きランダム +\nディスカバリーローテーション)"]
-            SEL --> PB["プロンプトビルダー\n(system + user プロンプト)"]
+            FS["フォルダスキャナ"]
+            SEL["ファイルセレクタ\n(重み付きランダム)"]
+            PB["プロンプトビルダー"]
+            FS --> SEL --> PB
         end
 
         subgraph SDK_LAYER ["🤖 GitHub Copilot SDK"]
-            direction TB
             CLIENT["CopilotClientWrapper\n(リトライ + タイムアウト)"]
         end
 
-        subgraph OUTPUT ["📤 出力 & UX"]
-            direction TB
-            OW["出力ライター"] --> MDF["📄 Markdown ファイル"]
-            OW --> TOAST["🔔 トースト通知"]
-            TOAST --> VIEWER["🌐 HTML ビューア\n(クイズ回答フォーム)"]
+        subgraph OUTPUT ["📤 出力 & 通知"]
+            OW["出力ライター"]
+            MDF["📄 Markdown"]
+            TOAST["🔔 トースト"]
+            VIEWER["🌐 HTML ビューア"]
+            OW --> MDF
+            OW --> TOAST --> VIEWER
         end
 
-        subgraph QUIZ ["🎯 クイズ & 復習"]
-            direction TB
-            SCORE["クイズ採点\n(別 LLM 呼び出し)"] --> SR["間隔反復\n(state.json)"]
+        subgraph QUIZ ["🎯 クイズ & 間隔反復"]
+            SCORE["クイズ採点\n(別 LLM 呼び出し)"]
+            SR["間隔反復\n(state.json)"]
+            SCORE --> SR
         end
-
-        MD --> FS
-        PB --> CLIENT
-        CLIENT --> OW
-        VIEWER -- "ユーザー回答" --> SCORE
     end
 
-    subgraph EXTERNAL ["☁️ 外部 (gh copilot CLI 経由のみ)"]
-        BING["🔍 Bing Web 検索\n(SDK 組み込み)"]
-        MCP["🏢 WorkIQ MCP\n(stdio, オプション)"]
+    subgraph EXTERNAL ["☁️ 外部 — SDK 経由のみ"]
+        BING["🔍 Bing Web 検索"]
+        MCP["🏢 WorkIQ MCP"]
     end
+
+    MD --> FS
+    PB --> CLIENT
+    CLIENT --> OW
+    VIEWER -. "ユーザー回答" .-> SCORE
 
     CLIENT -- "機能 A" --> BING
     CLIENT -- "機能 A" --> MCP
-    CLIENT -. "機能 B\n(ツールなし)" .-> CLIENT
+    CLIENT -. "機能 B (ツールなし)" .-> CLIENT
 
     style LOCAL_ENV fill:#f0f8ff,stroke:#4a90d9,stroke-width:2px
     style EXTERNAL fill:#fff3e0,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5
