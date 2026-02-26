@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -46,6 +47,7 @@ def _show_notification(
             msg=message,
             duration="short",
         )
+        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
 
         if on_click is not None:
@@ -98,6 +100,7 @@ def notify_briefing(
             msg=message,
             duration="short",
         )
+        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
 
         # 通知の「開く」ボタンは OS デフォルトアプリでファイルを開く（フォールバック）
@@ -190,6 +193,7 @@ def notify_error(
             msg=msg,
             duration="long",
         )
+        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
         toast.show()
         logger.info("エラー通知を表示: %s — %s", feature, short_err)
@@ -221,6 +225,7 @@ def notify_workiq_setup(
             msg=t("notify.workiq_toast_body"),
             duration="long",
         )
+        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
         toast.add_actions(label=t("notify.workiq_setup_btn"), launch="")
         toast.show()
