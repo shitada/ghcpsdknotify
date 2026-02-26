@@ -59,7 +59,7 @@ flowchart TB
 
     MD --> FS
     PB --> CLIENT
-    CLIENT -- "Feature A\n(uses tools)" --> BING
+    CLIENT -- "Feature A" --> BING
     CLIENT -- "Feature A" --> MCP
     CLIENT -- "Feature A & B" --> OW
     VIEWER_B -. "user answers" .-> SCORE
@@ -309,7 +309,7 @@ flowchart TB
 
     MD --> FS
     PB --> CLIENT
-    CLIENT -- "機能 A\n(ツール使用)" --> BING
+    CLIENT -- "機能 A" --> BING
     CLIENT -- "機能 A" --> MCP
     CLIENT -- "機能 A & B" --> OW
     VIEWER_B -. "ユーザー回答" .-> SCORE
