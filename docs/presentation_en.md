@@ -11,7 +11,7 @@
 
 ### Solution: Personal AI Daily Briefing Agent
 
-A Windows desktop application that automatically extracts local Markdown notes as context to deliver **personalized information and enhance learning**.
+A Windows desktop application that automatically extracts local Markdown notes as context — delivering not generic AI answers, but **personalized news, timely reminders, and spaced-repetition learning** tailored to each user's own knowledge base. Topics written in your notes are automatically reflected in daily briefings and review quizzes, seamlessly connecting your daily input with active recall so you can stay current and retain knowledge at the same time.
 
 | Feature | Overview | SDK Usage |
 |---------|----------|-----------|
