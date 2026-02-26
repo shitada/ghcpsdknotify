@@ -3,6 +3,12 @@
 tkinter + tkinterweb で Markdown ファイルを HTML レンダリング表示する。
 復習・クイズブリーフィングの場合はフォーム要素を自動挿入し、
 ローカル HTTP サーバー経由で採点する。
+
+**スレッド安全設計**:
+tkinter は単一スレッドでしか安全に動作しない。複数の tk.Tk() を
+別スレッドから生成するとセグフォルトを起こす。
+そのため、専用の「ビューアスレッド」で唯一の tk.Tk() を保持し、
+新しいウィンドウは tk.Toplevel() で開く。
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ import asyncio
 import ctypes
 import logging
 import os
+import queue
 import re
 import threading
 import tkinter as tk
@@ -32,6 +39,62 @@ if TYPE_CHECKING:
     from app.state_manager import StateManager
 
 logger = logging.getLogger(__name__)
+
+# ══════════════════════════════════════════════════════════════════════
+#  シングルスレッド tkinter マネージャ
+# ══════════════════════════════════════════════════════════════════════
+
+_tk_root: tk.Tk | None = None
+_tk_thread: threading.Thread | None = None
+_tk_lock = threading.Lock()
+_tk_queue: queue.Queue[tuple[Any, ...]] = queue.Queue()
+
+
+def _ensure_tk_thread() -> None:
+    """ビューア用の専用 tkinter スレッドを起動する（まだなければ）。"""
+    global _tk_root, _tk_thread
+
+    with _tk_lock:
+        if _tk_thread is not None and _tk_thread.is_alive():
+            return  # 既に稼働中
+
+        _tk_thread = threading.Thread(
+            target=_tk_main_loop,
+            daemon=True,
+            name="ViewerTkThread",
+        )
+        _tk_thread.start()
+
+
+def _tk_main_loop() -> None:
+    """専用スレッドで唯一の tk.Tk() を作成し mainloop を回す。"""
+    global _tk_root
+
+    _tk_root = tk.Tk()
+    _tk_root.withdraw()  # ルートウィンドウは非表示
+
+    def _poll_queue() -> None:
+        """キューに入っている open_viewer リクエストを処理する。"""
+        try:
+            while not _tk_queue.empty():
+                args = _tk_queue.get_nowait()
+                try:
+                    _open_viewer_in_tk(*args)
+                except Exception:
+                    logger.exception("ビューア表示に失敗しました（キュー処理）")
+        except Exception:
+            pass
+        if _tk_root is not None:
+            _tk_root.after(200, _poll_queue)
+
+    _tk_root.after(200, _poll_queue)
+
+    try:
+        _tk_root.mainloop()
+    except Exception:
+        logger.exception("tkinter mainloop が異常終了しました")
+    finally:
+        _tk_root = None
 
 # ── システムダークモード検出 ──
 
@@ -262,7 +325,7 @@ def _md_to_html(md_content: str) -> str:
 
 
 def _build_quiz_panel(
-    parent: tk.Tk,
+    parent: tk.Tk | tk.Toplevel,
     quiz_topics: list[dict[str, str]],
     dark: bool,
     panel_height: int = 320,
@@ -471,8 +534,8 @@ def open_viewer(
 ) -> None:
     """MD プレビューアウィンドウを開く。
 
-    briefing_quiz_*.md の場合は、ネイティブ tkinter ウィジェットで
-    クイズ回答パネルを表示し、バックグラウンドスレッドで採点する。
+    専用の tkinter スレッドにリクエストをキューイングし、
+    tk.Toplevel() でウィンドウを作成する。複数ウィンドウでも安全。
 
     Args:
         file_path: 表示する MD ファイルのパス。
@@ -499,6 +562,36 @@ def open_viewer(
             logger.exception("ファイルを開けませんでした: %s", file_path)
         return
 
+    # 専用 tkinter スレッドを起動（まだなければ）
+    _ensure_tk_thread()
+
+    # リクエストをキューに入れる（tkinter スレッドで処理される）
+    _tk_queue.put((file_path, md_content, state_manager, app_config))
+
+
+def _open_viewer_in_tk(
+    file_path: str,
+    md_content: str,
+    state_manager: Any | None = None,
+    app_config: Any | None = None,
+) -> None:
+    """tkinter スレッド内でビューアウィンドウを作成する（内部用）。
+
+    この関数は必ず _tk_main_loop のスレッドから呼び出される。
+    tk.Toplevel() を使い、複数ウィンドウを安全に共存させる。
+    """
+    global _tk_root
+
+    if _tk_root is None:
+        logger.error("tk_root が存在しません。ビューアを開けません。")
+        try:
+            os.startfile(file_path)  # type: ignore[attr-defined]
+        except Exception:
+            logger.exception("フォールバック: ファイルを開けませんでした: %s", file_path)
+        return
+
+    path = Path(file_path)
+
     # クイズ付きブリーフィングかどうか判定
     is_quiz = path.name.startswith("briefing_quiz_")
 
@@ -511,11 +604,11 @@ def open_viewer(
         from app.utils import extract_topic_keys
         quiz_topics = extract_topic_keys(md_content)
 
-    # tkinter ウィンドウを作成
+    # tkinter ウィンドウを作成（Toplevel を使用）
     logger.info("ビューアウィンドウを作成します")
     dark = _is_dark_mode()
     try:
-        root = tk.Tk()
+        root = tk.Toplevel(_tk_root)
         root.title(t("viewer.title", name=path.name))
         root.geometry("1100x750")
 
@@ -727,7 +820,6 @@ def open_viewer(
             root.destroy()
 
         root.protocol("WM_DELETE_WINDOW", on_close)
-        root.mainloop()
 
     except Exception:
         logger.exception("ビューアの表示に失敗しました（軽微エラー）")
