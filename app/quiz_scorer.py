@@ -172,14 +172,32 @@ def _extract_quiz_questions(
     # マーカー以降のテキストを取得
     section_text = briefing_content[marker.end() :]
 
-    # 次の topic_key マーカーまでを対象範囲とする
-    # （## 見出しで区切ると Q1/Q2 見出しより前で切れてしまうため）
-    next_marker = re.search(
-        r"<!--\s*topic_key:",
-        section_text,
-    )
-    if next_marker:
-        section_text = section_text[: next_marker.start()]
+    # Quiz Results セクションがあればそこで区切る
+    results_marker = re.search(r"^## 📝 Quiz Results", section_text, re.MULTILINE)
+    if results_marker:
+        section_text = section_text[: results_marker.start()]
+
+    # 次の topic_key マーカーまでを対象範囲とするが、
+    # Q1/Q2 見出し直前のマーカーはスキップして範囲に含める
+    # （LLM が Q1/Q2 に個別マーカーを付ける場合がある）
+    search_pos = 0
+    while True:
+        next_marker = re.search(
+            r"<!--\s*topic_key:\s*(.+?)\s*-->",
+            section_text[search_pos:],
+        )
+        if not next_marker:
+            break
+        # マーカー直後の ### 行を確認
+        after_marker = section_text[search_pos + next_marker.end():]
+        heading_match = re.match(r"\s*\n\s*###\s*(Q[12]\b)", after_marker)
+        if heading_match:
+            # Q1/Q2 見出しなのでスキップして続行
+            search_pos += next_marker.end()
+            continue
+        # 別トピックのマーカー → ここで区切る
+        section_text = section_text[: search_pos + next_marker.start()]
+        break
 
     # Q1 と Q2 を分割
     q1_text = ""
