@@ -429,7 +429,7 @@ def _build_quiz_panel(
                 relief=tk.FLAT, bd=0,
             ).pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        q1_var = tk.StringVar(value="")
+        q1_var = tk.StringVar(master=topic_frame, value="")
         q1_row = tk.Frame(topic_frame, bg=bg)
         q1_row.pack(fill=tk.X, padx=16)
         for choice in ["A", "B", "C", "D"]:
