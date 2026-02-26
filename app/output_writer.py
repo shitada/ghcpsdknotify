@@ -39,12 +39,26 @@ def _determine_output_folder(
     Raises:
         ValueError: input_folders が空の場合。
     """
-    # 既存パスが有効ならそのまま使用
+    # 既存パスが有効かつ、現在の input_folders 配下であればそのまま使用
     if existing_output_path:
-        existing = Path(existing_output_path)
+        existing = Path(existing_output_path).resolve()
         if existing.exists() and existing.is_dir():
-            logger.debug("既存の出力フォルダを使用: %s", existing)
-            return existing
+            # input_folders が変更されていないか確認
+            if input_folders:
+                current_base = Path(input_folders[0]).resolve()
+                if existing.parent == current_base:
+                    logger.debug("既存の出力フォルダを使用: %s", existing)
+                    return existing
+                else:
+                    logger.info(
+                        "input_folders が変更されたため出力フォルダを再決定します: "
+                        "%s → %s",
+                        existing.parent,
+                        current_base,
+                    )
+            else:
+                logger.debug("既存の出力フォルダを使用: %s", existing)
+                return existing
 
     # 新規作成
     if not input_folders:
