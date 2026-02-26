@@ -172,11 +172,11 @@ def _extract_quiz_questions(
     # マーカー以降のテキストを取得
     section_text = briefing_content[marker.end() :]
 
-    # 次の topic_key マーカーまたは次の ## セクションまでを対象範囲とする
+    # 次の topic_key マーカーまでを対象範囲とする
+    # （## 見出しで区切ると Q1/Q2 見出しより前で切れてしまうため）
     next_marker = re.search(
-        r"<!--\s*topic_key:|^## ",
+        r"<!--\s*topic_key:",
         section_text,
-        re.MULTILINE,
     )
     if next_marker:
         section_text = section_text[: next_marker.start()]
@@ -185,9 +185,9 @@ def _extract_quiz_questions(
     q1_text = ""
     q2_text = ""
 
-    # Q1 を探す（「Q1」「**Q1**」等のパターン）
+    # Q1 を探す（「Q1」「**Q1**」「## Q1」「### Q1」等のパターン）
     q1_match = re.search(
-        r"(?:^|\n)\s*(?:\*\*)?Q1[.:]?(?:\*\*)?.*?\n(.*?)(?=(?:\n\s*(?:\*\*)?Q2[.:]?)|$)",
+        r"(?:^|\n)\s*(?:#{1,4}\s+)?(?:\*\*)?Q1[^\n]*\n(.*?)(?=(?:\n\s*(?:#{1,4}\s+)?(?:\*\*)?Q2[^a-zA-Z0-9])|$)",
         section_text,
         re.DOTALL | re.IGNORECASE,
     )
@@ -196,7 +196,7 @@ def _extract_quiz_questions(
 
     # Q2 を探す
     q2_match = re.search(
-        r"(?:^|\n)\s*(?:\*\*)?Q2[.:]?(?:\*\*)?.*?\n(.*?)$",
+        r"(?:^|\n)\s*(?:#{1,4}\s+)?(?:\*\*)?Q2[^\n]*\n(.*?)$",
         section_text,
         re.DOTALL | re.IGNORECASE,
     )
@@ -230,7 +230,7 @@ async def _score_topic(
     # ソース MD 読み込み
     source_content = _read_source_content(topic_key, input_folders)
     if not source_content:
-        source_content = "（ソース資料が見つかりませんでした）"
+        source_content = t("scorer.source_not_found")
 
     # ブリーフィング MD から問題文を抽出
     briefing_content = ""
@@ -244,9 +244,9 @@ async def _score_topic(
     )
 
     if not q1_question_text:
-        q1_question_text = "（問題文の抽出に失敗しました）"
+        q1_question_text = t("scorer.question_extraction_failed")
     if not q2_question_text:
-        q2_question_text = "（問題文の抽出に失敗しました）"
+        q2_question_text = t("scorer.question_extraction_failed")
 
     # 採点プロンプト構築
     template = (
