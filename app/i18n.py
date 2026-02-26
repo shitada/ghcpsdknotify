@@ -191,6 +191,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "scorer.level_downgrade": "Level {level} に降格",
         "scorer.level_unchanged": "Level {level} 据え置き",
         "scorer.next_quiz_info": "{date}（{detail}）",
+        "scorer.question_extraction_failed": "（問題文の抽出に失敗しました）",
+        "scorer.source_not_found": "（ソース資料が見つかりませんでした）",
         # クイズサーバー (quiz_server)
         "server.error_empty_body": "リクエストボディが空です",
         "server.error_topic_key_required": "topic_key が必要です",
@@ -379,6 +381,8 @@ _STRINGS: dict[str, dict[str, str]] = {
         "scorer.level_downgrade": "Level {level} (downgraded)",
         "scorer.level_unchanged": "Level {level} (unchanged)",
         "scorer.next_quiz_info": "{date} ({detail})",
+        "scorer.question_extraction_failed": "(Question text extraction failed)",
+        "scorer.source_not_found": "(Source material not found)",
         # Quiz server
         "server.error_empty_body": "Request body is empty",
         "server.error_topic_key_required": "topic_key is required",
