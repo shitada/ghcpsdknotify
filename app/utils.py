@@ -146,12 +146,22 @@ def estimate_tokens(text: str) -> int:
     return max(word_based, char_based)
 
 
+def _is_question_title(title: str) -> bool:
+    """タイトルが Q1/Q2 問題見出しかどうかを判定する。
+
+    LLM が Q1 / Q2 にも ``<!-- topic_key: ... -->`` マーカーを付ける場合があり、
+    それらをトピックとして扱わないためのフィルタ。
+    """
+    import re
+    return bool(re.match(r"Q[12]\b", title.strip()))
+
+
 def extract_topic_keys(md_content: str) -> list[dict[str, str]]:
     """ブリーフィング MD から topic_key を抽出する。
 
     <!-- topic_key: ... --> 形式の HTML コメントを検索する。
-    直後の ### 行からトピックタイトル、**Q1（4択）** / **Q2（記述）** の
-    直後にある問題文もあわせて取得する。
+    直後の ### 行からトピックタイトル、Q1 / Q2 問題文もあわせて取得する。
+    タイトルが Q1/Q2 で始まるマーカーは問題見出しとみなしスキップする。
 
     Args:
         md_content: ブリーフィング MD テキスト。
@@ -169,32 +179,53 @@ def extract_topic_keys(md_content: str) -> list[dict[str, str]]:
         re.MULTILINE,
     )
 
-    # 各トピックの開始位置を収集してブロックに分割
-    matches = list(topic_block_pattern.finditer(md_content))
-    for i, match in enumerate(matches):
+    # 全マーカーを収集
+    all_matches = list(topic_block_pattern.finditer(md_content))
+
+    # トピックマーカー (Q1/Q2 見出しでないもの) のみ抽出
+    topic_matches = [
+        m for m in all_matches if not _is_question_title(m.group(2).strip())
+    ]
+
+    for i, match in enumerate(topic_matches):
         topic_key = match.group(1).strip()
         title = match.group(2).strip()
 
-        # ブロック終端（次のトピックコメントの手前、または文末）
-        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(md_content)
+        # ブロック終端: 次のトピックマーカー（Q1/Q2 でない）まで、または文末
+        # Quiz Results セクションがあればそこで終了
+        block_end = (
+            topic_matches[i + 1].start()
+            if i + 1 < len(topic_matches)
+            else len(md_content)
+        )
+        # Quiz Results セクションより後ろは含めない
+        results_marker = re.search(
+            r"^## 📝 Quiz Results", md_content[match.start():block_end], re.MULTILINE
+        )
+        if results_marker:
+            block_end = match.start() + results_marker.start()
+
         block = md_content[match.start(): block_end]
 
-        # Q1 問題文: **Q1（4択）** 〜 最初の選択肢 "- A)" の手前まで
+        # Q1 問題文を抽出
+        # 日本語: **Q1（4択）** 〜 選択肢 "- A)" の手前
+        # 英語: ## Q1 — Multiple Choice / ### Q1 — ... 等
         q1_text = ""
         q1_match = re.search(
-            r"\*\*Q1（4択）\*\*\s*\n+(.+?)(?=\n-\s*A[)）]|\n---)",
+            r"(?:\*\*Q1（4択）\*\*|(?:#{1,4}\s+)?Q1[^\n]*)"
+            r"\s*\n+(.+?)(?=\n-\s*A[)）]|\n\*\*A[.)）]|\n---)",
             block,
             re.DOTALL,
         )
         if q1_match:
             q1_text = q1_match.group(1).strip()
-            # 引用ブロックのマーカー ">" を除去して読みやすく
             q1_text = re.sub(r"^>\s?", "", q1_text, flags=re.MULTILINE).strip()
 
-        # Q2 問題文: **Q2（記述）** 〜 次の "---" の手前まで
+        # Q2 問題文を抽出
         q2_text = ""
         q2_match = re.search(
-            r"\*\*Q2（記述）\*\*\s*\n+(.+?)(?=\n---)",
+            r"(?:\*\*Q2（記述）\*\*|(?:#{1,4}\s+)?Q2[^\n]*)"
+            r"\s*\n+(.+?)(?=\n---|\.\n\n|$)",
             block,
             re.DOTALL,
         )
