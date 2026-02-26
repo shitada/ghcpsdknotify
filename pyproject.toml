@@ -1,0 +1,22 @@
+[project]
+name = "ghcpsdknotify"
+version = "0.1.0"
+description = "Personal AI Daily Briefing Agent — summarizes your Markdown notes and generates review quizzes using GitHub Copilot SDK"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "apscheduler>=3.10",
+    "github-copilot-sdk>=0.1.25",
+    "markdown2>=2.4",
+    "pillow>=10.0",
+    "pystray>=0.19",
+    "pyyaml>=6.0",
+    "tkinterweb>=3.24",
+    "winotify>=1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]

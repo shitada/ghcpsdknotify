@@ -1,0 +1,25 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+*.egg-info/
+.pytest_cache/
+
+# App runtime
+logs/
+settings/
+_briefings/
+
+# IDE
+.vscode/
+*.code-workspace
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Docs (not uploaded to GitHub)
+docs/
