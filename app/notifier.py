@@ -7,8 +7,8 @@ winotify を使用してデスクトップ通知を表示する。
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
-import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -26,6 +26,48 @@ logger = logging.getLogger(__name__)
 def _get_app_id() -> str:
     """通知用アプリ ID を返す。"""
     return t("app.name")
+
+
+def _toast_show_with_clear(toast: Notification) -> None:
+    """トースト通知を表示する（旧通知をクリアしてポップアップを確実に表示）。
+
+    同一 Tag + Group の通知がアクションセンターに残っている場合、
+    Windows は「サイレント更新」を行いバナーポップアップが出ない。
+    Show() の直前に History.Clear() を実行することで常にポップアップを表示する。
+    """
+    # winotify show() と同等の前処理
+    if toast.actions:
+        toast.actions = "\n".join(toast.actions)
+    else:
+        toast.actions = ""
+    if toast.audio == audio.Silent:
+        toast.audio = '<audio silent="true" />'
+    if toast.launch:
+        toast.launch = 'activationType="protocol" launch="{}"'.format(toast.launch)
+
+    from winotify import TEMPLATE
+
+    script = TEMPLATE.format(**toast.__dict__)
+
+    # $Notifier.Show($Toast) の前に History.Clear() を注入
+    clear_cmd = (
+        "[Windows.UI.Notifications.ToastNotificationManager]"
+        '::History.Clear("{app_id}")\n'.format(app_id=toast.app_id)
+    )
+    script = script.replace(
+        "$Notifier.Show($Toast);",
+        clear_cmd + "$Notifier.Show($Toast);",
+    )
+
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    subprocess.Popen(
+        ["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        startupinfo=si,
+    )
 
 
 def _show_notification(
@@ -47,7 +89,6 @@ def _show_notification(
             msg=message,
             duration="short",
         )
-        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
 
         if on_click is not None:
@@ -58,7 +99,7 @@ def _show_notification(
             # ここではアクションボタンを追加する方式で対応。
             pass
 
-        toast.show()
+        _toast_show_with_clear(toast)
         logger.debug("通知を表示: %s", title)
     except Exception:
         logger.exception("通知の表示に失敗しました（軽微エラー）")
@@ -100,13 +141,12 @@ def notify_briefing(
             msg=message,
             duration="short",
         )
-        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
 
         # 通知の「開く」ボタンは OS デフォルトアプリでファイルを開く（フォールバック）
         toast.add_actions(label=t("notify.open"), launch=file_path)
 
-        toast.show()
+        _toast_show_with_clear(toast)
         logger.info("ブリーフィング通知を表示: %s (%s)", feature, file_path)
 
         # winotify は Python コールバックを直接呼べないため、
@@ -193,9 +233,8 @@ def notify_error(
             msg=msg,
             duration="long",
         )
-        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
-        toast.show()
+        _toast_show_with_clear(toast)
         logger.info("エラー通知を表示: %s — %s", feature, short_err)
     except Exception:
         logger.exception("エラー通知の表示に失敗しました")
@@ -225,10 +264,9 @@ def notify_workiq_setup(
             msg=t("notify.workiq_toast_body"),
             duration="long",
         )
-        toast.tag = f"{toast.tag}_{int(time.time() * 1000)}"
         toast.set_audio(audio.Default, loop=False)
         toast.add_actions(label=t("notify.workiq_setup_btn"), launch="")
-        toast.show()
+        _toast_show_with_clear(toast)
         logger.info("WorkIQ セットアップ通知を表示")
     except Exception:
         logger.exception("WorkIQ セットアップ通知の表示に失敗しました（軽微エラー）")
