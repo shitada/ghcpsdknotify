@@ -4,6 +4,10 @@
 
 Many users save knowledge locally as Markdown files — research results from LLM conversations, task management notes, learning logs, and more. This **Windows-only** desktop application leverages those local Markdown files as personal context: it periodically reads them from specified folders, retrieves and summarizes the latest information tailored to your interests, and generates review quizzes to reinforce learning — all powered by the **GitHub Copilot SDK**.
 
+## Demo
+
+<video src="presentations/ghcpsdknotify.mp4" controls width="100%"></video>
+
 ## Features
 
 - **Feature A — News Briefing**: Searches and summarizes the latest news & technical updates on topics found in your notes
