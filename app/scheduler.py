@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # 同時実行避譲の遅延秒数（3 分）
 _DEFER_SECONDS = 180
 
+# スリープ復帰後にジョブを実行する猶予時間（3 時間）
+_MISFIRE_GRACE_TIME = 10800
+
 # ジョブ ID
 _JOB_A_PREFIX = "job_a"
 _JOB_B_PREFIX = "job_b"
@@ -39,7 +42,13 @@ class Scheduler:
     def __init__(self) -> None:
         """Scheduler を初期化する。"""
         self._local_tz = get_localzone()
-        self._scheduler = BackgroundScheduler(timezone=self._local_tz)
+        self._scheduler = BackgroundScheduler(
+            timezone=self._local_tz,
+            job_defaults={
+                "misfire_grace_time": _MISFIRE_GRACE_TIME,
+                "coalesce": True,
+            },
+        )
         self._lock_a = threading.Lock()
         self._lock_b = threading.Lock()
         self._running_a = False
@@ -71,7 +80,11 @@ class Scheduler:
 
         self._scheduler.start()
         self._started = True
-        logger.info("スケジューラを開始しました (タイムゾーン: %s)", self._local_tz)
+        logger.info(
+            "スケジューラを開始しました (タイムゾーン: %s, misfire猶予: %d秒)",
+            self._local_tz,
+            _MISFIRE_GRACE_TIME,
+        )
 
     def stop(self) -> None:
         """スケジューラを停止する。"""
