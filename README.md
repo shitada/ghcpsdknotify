@@ -6,7 +6,7 @@ Many users save knowledge locally as Markdown files — research results from LL
 
 ## Demo
 
-https://github.com/user-attachments/assets/2fa56041-31ab-4f4d-8d6d-80111727c096
+https://github.com/user-attachments/assets/bfd8bc6b-5e02-4b83-aa39-3529e3010640
 
 ## Features
 
