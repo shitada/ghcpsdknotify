@@ -21,5 +21,8 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
+# Videos (uploaded via GitHub user-attachments)
+*.mp4
+
 # Docs (not uploaded to GitHub)
 docs/

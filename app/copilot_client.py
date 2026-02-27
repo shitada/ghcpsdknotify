@@ -204,6 +204,7 @@ class CopilotClientWrapper:
 
         Web 検索は SDK 組み込み機能に委譲する。
         WorkIQ MCP が有効の場合は stdio MCP サーバーとして登録する。
+        WorkIQ MCP 付きでタイムアウトした場合は、MCP なしで自動フォールバックする。
 
         Args:
             system_prompt: 機能 A 用のシステムプロンプト。
@@ -213,27 +214,47 @@ class CopilotClientWrapper:
         Returns:
             生成されたブリーフィングテキスト。
         """
-        mcp_servers: dict[str, Any] | None = None
-
-        if workiq_config.enabled:
-            mcp_servers = {
-                "workiq": {
-                    "type": "stdio",
-                    "command": "npx",
-                    "args": ["-y", "@microsoft/workiq", "mcp"],
-                    "tools": ["*"],
-                },
-            }
-            logger.info("WorkIQ MCP を登録 (stdio)")
-        else:
+        if not workiq_config.enabled:
             logger.info("WorkIQ MCP は未設定。Web 検索のみで動作します")
+            return await self._send_prompt(
+                system_prompt,
+                user_prompt,
+                timeout=self._sdk_config.sdk_timeout,
+                operation_name="機能A ブリーフィング生成",
+            )
 
+        # WorkIQ MCP 付きで試行
+        mcp_servers: dict[str, Any] = {
+            "workiq": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@microsoft/workiq", "mcp"],
+                "tools": ["*"],
+            },
+        }
+        logger.info("WorkIQ MCP を登録 (stdio)")
+
+        try:
+            return await self._send_prompt(
+                system_prompt,
+                user_prompt,
+                timeout=self._sdk_config.sdk_timeout,
+                mcp_servers=mcp_servers,
+                operation_name="機能A ブリーフィング生成 (WorkIQ付き)",
+            )
+        except (TimeoutError, Exception) as e:
+            logger.warning(
+                "WorkIQ MCP 付きの生成に失敗しました (%s)。"
+                "WorkIQ MCP なしでフォールバックします",
+                e,
+            )
+
+        # フォールバック: WorkIQ MCP なしで再試行
         return await self._send_prompt(
             system_prompt,
             user_prompt,
             timeout=self._sdk_config.sdk_timeout,
-            mcp_servers=mcp_servers,
-            operation_name="機能A ブリーフィング生成",
+            operation_name="機能A ブリーフィング生成 (フォールバック)",
         )
 
     async def generate_briefing_b(
