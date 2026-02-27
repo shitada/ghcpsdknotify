@@ -6,7 +6,7 @@ Many users save knowledge locally as Markdown files — research results from LL
 
 ## Demo
 
-<video src="presentations/ghcpsdknotify.mp4" controls width="100%"></video>
+https://github.com/shitada/ghcpsdknotify/raw/master/presentations/ghcpsdknotify.mp4
 
 ## Features
 
