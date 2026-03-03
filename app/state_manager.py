@@ -59,6 +59,8 @@ class AppState:
     run_count_a: int = 0
     run_count_b: int = 0
     last_run_at: str = ""
+    last_run_a_at: str = ""
+    last_run_b_at: str = ""
     output_folder_path: str = ""
     random_pick_history: list[str] = field(default_factory=list)
     pending_quizzes: list[PendingQuiz] = field(default_factory=list)
@@ -109,6 +111,8 @@ def _dict_to_app_state(d: dict[str, Any]) -> AppState:
         run_count_a=int(d.get("run_count_a", 0)),
         run_count_b=int(d.get("run_count_b", 0)),
         last_run_at=str(d.get("last_run_at", "")),
+        last_run_a_at=str(d.get("last_run_a_at", "")),
+        last_run_b_at=str(d.get("last_run_b_at", "")),
         output_folder_path=str(d.get("output_folder_path", "")),
         random_pick_history=list(d.get("random_pick_history", [])),
         pending_quizzes=[_dict_to_pending_quiz(p) for p in pending_raw] if isinstance(pending_raw, list) else [],
@@ -156,6 +160,8 @@ def _app_state_to_dict(state: AppState) -> dict[str, Any]:
         "run_count_a": state.run_count_a,
         "run_count_b": state.run_count_b,
         "last_run_at": state.last_run_at,
+        "last_run_a_at": state.last_run_a_at,
+        "last_run_b_at": state.last_run_b_at,
         "output_folder_path": state.output_folder_path,
         "random_pick_history": state.random_pick_history,
         "pending_quizzes": [_pending_quiz_to_dict(p) for p in state.pending_quizzes],
@@ -243,6 +249,22 @@ class StateManager:
         """最終実行日時を現在時刻に更新する。"""
         self._state.last_run_at = datetime.now().isoformat(timespec="seconds")
         logger.debug("last_run_at = %s", self._state.last_run_at)
+
+    def update_last_run_feature(self, feature: str) -> None:
+        """機能別の最終実行日時を現在時刻に更新する。
+
+        Args:
+            feature: "a" または "b"。
+        """
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        if feature == "a":
+            self._state.last_run_a_at = now_iso
+            logger.debug("last_run_a_at = %s", now_iso)
+        elif feature == "b":
+            self._state.last_run_b_at = now_iso
+            logger.debug("last_run_b_at = %s", now_iso)
+        else:
+            raise ValueError(f"不正な feature 値: {feature!r} （'a' または 'b' を指定）")
 
     def set_output_folder_path(self, path: str) -> None:
         """出力フォルダパスを設定する。

@@ -31,6 +31,14 @@ _MISFIRE_GRACE_TIME = 10800
 _JOB_A_PREFIX = "job_a"
 _JOB_B_PREFIX = "job_b"
 
+# 曜日名 → weekday() の数値マッピング
+_DAY_NAME_TO_NUM: dict[str, int] = {
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3,
+    "fri": 4, "sat": 5, "sun": 6,
+    "0": 0, "1": 1, "2": 2, "3": 3,
+    "4": 4, "5": 5, "6": 6,
+}
+
 
 class Scheduler:
     """APScheduler ベースのジョブスケジューラ。
@@ -190,6 +198,7 @@ class Scheduler:
         return CronTrigger(
             day_of_week=entry.day_of_week,
             hour=entry.hour,
+            minute=entry.minute,
             timezone=self._local_tz,
         )
 
@@ -260,3 +269,153 @@ class Scheduler:
                 logger.exception("機能 B の実行中にエラーが発生しました")
             finally:
                 self._running_b = False
+
+    # ─── 起動時キャッチアップ ───
+
+    def check_and_run_missed_jobs(
+        self,
+        config: AppConfig,
+        last_run_a_at: str,
+        last_run_b_at: str,
+    ) -> None:
+        """起動時に見逃されたジョブをチェックし、misfire 猶予内であれば即実行する。
+
+        PC スリープやアプリ未起動でスケジュール時刻を逃した場合に、
+        起動後に自動で実行するためのメソッド。
+
+        Args:
+            config: アプリケーション設定。
+            last_run_a_at: 機能 A の最終実行日時（ISO 形式）。空文字は未実行。
+            last_run_b_at: 機能 B の最終実行日時（ISO 形式）。空文字は未実行。
+        """
+        now = datetime.now()
+        today = now.date()
+        today_weekday = today.weekday()
+
+        # 機能 A のキャッチアップ
+        if self._on_job_a and _should_catchup(
+            config.schedule.feature_a, today_weekday, now, last_run_a_at,
+        ):
+            logger.info(
+                "起動時キャッチアップ: 機能 A のスケジュール時刻を逃しています。即時実行します"
+            )
+            self._scheduler.add_job(
+                self._on_trigger_a,
+                trigger=DateTrigger(run_date=now + timedelta(seconds=10)),
+                id="job_a_catchup",
+                replace_existing=True,
+                name="機能A (起動時キャッチアップ)",
+            )
+
+        # 機能 B のキャッチアップ
+        if self._on_job_b and _should_catchup(
+            config.schedule.feature_b, today_weekday, now, last_run_b_at,
+        ):
+            # 機能 A のキャッチアップがある場合は 5 分遅延して重複を回避
+            a_has_catchup = self._on_job_a and _should_catchup(
+                config.schedule.feature_a, today_weekday, now, last_run_a_at,
+            )
+            delay = _DEFER_SECONDS + 10 if a_has_catchup else 10
+            logger.info(
+                "起動時キャッチアップ: 機能 B のスケジュール時刻を逃しています。%d秒後に実行します",
+                delay,
+            )
+            self._scheduler.add_job(
+                self._on_trigger_b,
+                trigger=DateTrigger(run_date=now + timedelta(seconds=delay)),
+                id="job_b_catchup",
+                replace_existing=True,
+                name="機能B (起動時キャッチアップ)",
+            )
+
+
+# ── キャッチアップ判定ヘルパー ──
+
+
+def _parse_day_of_week_set(day_of_week: str) -> set[int]:
+    """APScheduler 形式の day_of_week 文字列を weekday 数値の集合に変換する。
+
+    "mon,tue,wed" → {0, 1, 2}
+    "mon-fri" → {0, 1, 2, 3, 4}
+
+    Args:
+        day_of_week: APScheduler 形式の曜日指定文字列。
+
+    Returns:
+        weekday() 数値の集合。
+    """
+    result: set[int] = set()
+    for part in day_of_week.split(","):
+        part = part.strip().lower()
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            start = _DAY_NAME_TO_NUM.get(start_str.strip())
+            end = _DAY_NAME_TO_NUM.get(end_str.strip())
+            if start is not None and end is not None:
+                if start <= end:
+                    result.update(range(start, end + 1))
+                else:
+                    # 例: fri-mon → {4, 5, 6, 0}
+                    result.update(range(start, 7))
+                    result.update(range(0, end + 1))
+        else:
+            num = _DAY_NAME_TO_NUM.get(part)
+            if num is not None:
+                result.add(num)
+    return result
+
+
+def _should_catchup(
+    schedule_entries: list[ScheduleEntry],
+    today_weekday: int,
+    now: datetime,
+    last_run_at: str,
+) -> bool:
+    """スケジュールエントリが今日見逃されたかを判定する。
+
+    Args:
+        schedule_entries: スケジュールエントリのリスト。
+        today_weekday: 今日の曜日番号（0=月〜6=日）。
+        now: 現在日時。
+        last_run_at: 最終実行日時（ISO 形式、空文字＝未実行）。
+
+    Returns:
+        True ならキャッチアップ実行が必要。
+    """
+    today = now.date()
+
+    # 今日すでに正常に実行済みならスキップ
+    if last_run_at:
+        try:
+            last_run = datetime.fromisoformat(last_run_at)
+            if last_run.date() == today:
+                return False
+        except ValueError:
+            pass
+
+    # いずれかのスケジュールエントリで「今日該当 & 時刻超過 & 猶予内」ならTrue
+    for entry in schedule_entries:
+        days = _parse_day_of_week_set(entry.day_of_week)
+        if today_weekday not in days:
+            continue
+
+        scheduled_hour = int(entry.hour)
+        scheduled_minute = int(entry.minute)
+        scheduled_dt = now.replace(
+            hour=scheduled_hour, minute=scheduled_minute, second=0, microsecond=0,
+        )
+
+        if now < scheduled_dt:
+            continue  # まだ時刻が来ていない
+
+        elapsed = (now - scheduled_dt).total_seconds()
+        if elapsed <= _MISFIRE_GRACE_TIME:
+            logger.debug(
+                "キャッチアップ対象: day_of_week=%s, hour=%s, minute=%s "
+                "(経過 %d 秒, 猶予 %d 秒)",
+                entry.day_of_week, entry.hour, entry.minute,
+                int(elapsed), _MISFIRE_GRACE_TIME,
+            )
+            return True
+
+    return False
