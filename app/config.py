@@ -27,6 +27,7 @@ class ScheduleEntry:
 
     day_of_week: str = "mon-fri"
     hour: str = "9"
+    minute: str = "0"
 
 
 @dataclass
@@ -113,6 +114,7 @@ def _dict_to_schedule_entry(d: dict[str, Any]) -> ScheduleEntry:
     return ScheduleEntry(
         day_of_week=str(d.get("day_of_week", "mon-fri")),
         hour=str(d.get("hour", "9")),
+        minute=str(d.get("minute", "0")),
     )
 
 

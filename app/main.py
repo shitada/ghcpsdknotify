@@ -599,6 +599,7 @@ def _run_job_a() -> None:
         # 9. state.json 更新
         sm.increment_run_count("a")
         sm.update_last_run()
+        sm.update_last_run_feature("a")
         random_picked = get_random_picked_paths(selection)
         if random_picked:
             sm.update_random_pick_history(random_picked)
@@ -735,6 +736,7 @@ def _run_job_b() -> None:
         # 9. state.json 更新
         sm.increment_run_count("b")
         sm.update_last_run()
+        sm.update_last_run_feature("b")
         random_picked = get_random_picked_paths(selection)
         if random_picked:
             sm.update_random_pick_history(random_picked)
@@ -992,6 +994,13 @@ def main() -> None:
             config=_app_config,
             on_job_a=_run_job_a,
             on_job_b=_run_job_b,
+        )
+
+        # 5.5. 起動時キャッチアップ（スリープ復帰・遅延起動対応）
+        _scheduler.check_and_run_missed_jobs(
+            config=_app_config,
+            last_run_a_at=_state_manager.state.last_run_a_at,
+            last_run_b_at=_state_manager.state.last_run_b_at,
         )
 
         # 6. pystray でシステムトレイ常駐
