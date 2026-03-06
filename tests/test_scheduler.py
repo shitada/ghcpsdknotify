@@ -1,15 +1,18 @@
 """scheduler モジュールのユニットテスト。
 
 スケジュールトリガー生成、起動時キャッチアップ判定、
-曜日パース等をテストする。
+曜日パース、スリープ復帰監視等をテストする。
 """
 
+import time
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from app.config import AppConfig, ScheduleConfig, ScheduleEntry
 from app.scheduler import (
     Scheduler,
+    _WATCHDOG_INTERVAL,
+    _WATCHDOG_TOLERANCE,
     _parse_day_of_week_set,
     _should_catchup,
 )
@@ -92,17 +95,17 @@ class TestShouldCatchup:
         now = datetime(2026, 3, 3, 10, 0, 0)  # 火曜
         assert _should_catchup(entries, 1, now, "") is False
 
-    def test_no_catchup_grace_time_exceeded(self):
-        """猶予時間（3時間）を超過 → False。"""
+    def test_catchup_after_long_delay(self):
+        """同一日であれば時間制限なくキャッチアップ → True。"""
         entries = [ScheduleEntry(day_of_week="mon-fri", hour="9", minute="0")]
-        # 月曜 13:00 → 9:00 から 4 時間経過（猶予 3 時間超）
+        # 月曜 13:00 → 9:00 から 4 時間経過でも同日ならキャッチアップ
         now = datetime(2026, 3, 2, 13, 0, 0)
-        assert _should_catchup(entries, 0, now, "") is False
+        assert _should_catchup(entries, 0, now, "") is True
 
-    def test_catchup_within_grace_time(self):
-        """猶予時間内（スケジュールから2時間後） → True。"""
+    def test_catchup_within_same_day(self):
+        """スケジュールから数時間後 → True。"""
         entries = [ScheduleEntry(day_of_week="mon-fri", hour="9", minute="0")]
-        # 月曜 11:00 → 9:00 から 2 時間経過（猶予 3 時間内）
+        # 月曜 11:00 → 9:00 から 2 時間経過
         now = datetime(2026, 3, 2, 11, 0, 0)
         assert _should_catchup(entries, 0, now, "") is True
 
@@ -119,7 +122,7 @@ class TestShouldCatchup:
             ScheduleEntry(day_of_week="mon-fri", hour="7", minute="0"),
             ScheduleEntry(day_of_week="mon-fri", hour="15", minute="0"),
         ]
-        # 月曜 16:00 → hour=7 は猶予超過 (9h), hour=15 は猶予内 (1h)
+        # 月曜 16:00 → hour=7 も hour=15 も同日内なのでキャッチアップ対象
         now = datetime(2026, 3, 2, 16, 0, 0)
         assert _should_catchup(entries, 0, now, "") is True
 
@@ -268,5 +271,128 @@ class TestCheckAndRunMissedJobs:
             catchup_ids = [j.id for j in jobs if "catchup" in j.id]
             assert "job_a_catchup" in catchup_ids
             assert "job_b_catchup" in catchup_ids
+        finally:
+            scheduler.stop()
+
+
+# ────────────────────────────────────────────
+# Scheduler watchdog (sleep/wake detection)
+# ────────────────────────────────────────────
+
+
+class TestWatchdog:
+    """スリープ復帰監視のテスト。"""
+
+    def test_watchdog_constants(self):
+        """ウォッチドッグ定数が妥当な値であること。"""
+        assert _WATCHDOG_INTERVAL > 0
+        assert _WATCHDOG_TOLERANCE > _WATCHDOG_INTERVAL
+
+    def test_watchdog_starts_and_stops(self):
+        """start() でウォッチドッグスレッドが開始され、stop() で停止する。"""
+        scheduler = Scheduler()
+        config = AppConfig(
+            schedule=ScheduleConfig(
+                feature_a=[ScheduleEntry(day_of_week="mon-fri", hour="9", minute="0")],
+                feature_b=[ScheduleEntry(day_of_week="mon-fri", hour="15", minute="0")],
+            )
+        )
+        scheduler.start(config=config, on_job_a=MagicMock(), on_job_b=MagicMock())
+        try:
+            assert scheduler._watchdog_thread is not None
+            assert scheduler._watchdog_thread.is_alive()
+            assert scheduler._watchdog_thread.daemon is True
+        finally:
+            scheduler.stop()
+        assert scheduler._watchdog_thread is None
+
+    def test_watchdog_detects_time_gap(self):
+        """壁時計の飛びを検知して scheduler.wakeup() を呼ぶ。"""
+        scheduler = Scheduler()
+        config = AppConfig(
+            schedule=ScheduleConfig(
+                feature_a=[ScheduleEntry(day_of_week="mon-fri", hour="9", minute="0")],
+                feature_b=[ScheduleEntry(day_of_week="mon-fri", hour="15", minute="0")],
+            )
+        )
+        scheduler.start(config=config, on_job_a=MagicMock(), on_job_b=MagicMock())
+
+        try:
+            # time.time() をモックして大きなジャンプをシミュレーション
+            real_time = time.time
+            call_count = [0]
+            base_time = real_time()
+
+            def fake_time():
+                call_count[0] += 1
+                if call_count[0] <= 1:
+                    return base_time
+                # 2回目以降: 1時間後（スリープ復帰を模擬）
+                return base_time + 3600
+
+            callback = MagicMock()
+            scheduler.set_on_sleep_wake(callback)
+
+            # ウォッチドッグを停止して手動テスト
+            scheduler._stop_watchdog()
+
+            with patch("app.scheduler.time") as mock_time:
+                mock_time.time.side_effect = fake_time
+                # _watchdog_stop.wait を1回だけFalse返しその後True返す
+                original_stop = scheduler._watchdog_stop
+
+                wait_calls = [0]
+                def fake_wait(timeout=None):
+                    wait_calls[0] += 1
+                    if wait_calls[0] == 1:
+                        return False  # continue loop
+                    return True  # stop loop
+
+                with patch.object(original_stop, "wait", side_effect=fake_wait):
+                    with patch.object(scheduler._scheduler, "wakeup") as mock_wakeup:
+                        scheduler._watchdog_loop()
+                        mock_wakeup.assert_called_once()
+
+            callback.assert_called_once()
+        finally:
+            scheduler.stop()
+
+    def test_watchdog_no_false_positive(self):
+        """通常の間隔ではスリープ復帰と誤検知しない。"""
+        scheduler = Scheduler()
+        config = AppConfig(
+            schedule=ScheduleConfig(
+                feature_a=[ScheduleEntry(day_of_week="mon-fri", hour="9", minute="0")],
+                feature_b=[ScheduleEntry(day_of_week="mon-fri", hour="15", minute="0")],
+            )
+        )
+        scheduler.start(config=config, on_job_a=MagicMock(), on_job_b=MagicMock())
+
+        try:
+            real_time = time.time
+            base_time = real_time()
+            call_count = [0]
+
+            def fake_time():
+                call_count[0] += 1
+                # 通常の 30 秒間隔（少し超過するが tolerance 内）
+                return base_time + call_count[0] * 35
+
+            scheduler._stop_watchdog()
+
+            with patch("app.scheduler.time") as mock_time:
+                mock_time.time.side_effect = fake_time
+
+                wait_calls = [0]
+                def fake_wait(timeout=None):
+                    wait_calls[0] += 1
+                    if wait_calls[0] == 1:
+                        return False
+                    return True
+
+                with patch.object(scheduler._watchdog_stop, "wait", side_effect=fake_wait):
+                    with patch.object(scheduler._scheduler, "wakeup") as mock_wakeup:
+                        scheduler._watchdog_loop()
+                        mock_wakeup.assert_not_called()
         finally:
             scheduler.stop()

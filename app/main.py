@@ -1003,6 +1003,18 @@ def main() -> None:
             last_run_b_at=_state_manager.state.last_run_b_at,
         )
 
+        # 5.6. スリープ復帰時のキャッチアップコールバックを登録
+        def _on_sleep_wake() -> None:
+            """スリープ復帰検知時にキャッチアップを再実行する。"""
+            logger.info("スリープ復帰検知: キャッチアップを再実行します")
+            _scheduler.check_and_run_missed_jobs(
+                config=_app_config,
+                last_run_a_at=_state_manager.state.last_run_a_at,
+                last_run_b_at=_state_manager.state.last_run_b_at,
+            )
+
+        _scheduler.set_on_sleep_wake(_on_sleep_wake)
+
         # 6. pystray でシステムトレイ常駐
         logger.info("システムトレイに常駐します")
         while True:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -24,12 +25,20 @@ logger = logging.getLogger(__name__)
 # 同時実行避譲の遅延秒数（3 分）
 _DEFER_SECONDS = 180
 
-# スリープ復帰後にジョブを実行する猶予時間（3 時間）
-_MISFIRE_GRACE_TIME = 10800
+# スリープ復帰後にジョブを実行する猶予時間（15 時間）
+# 朝9時のジョブが深夜0時までにスリープ復帰すれば実行される
+_MISFIRE_GRACE_TIME = 54000
 
 # ジョブ ID
 _JOB_A_PREFIX = "job_a"
 _JOB_B_PREFIX = "job_b"
+
+# スリープ復帰監視の間隔（秒）
+# Windows の WaitForSingleObjectEx はスリープ中の時間をカウントしないため、
+# APScheduler の Event.wait() が長時間スリープ後に復帰しない問題を回避する。
+# 30 秒ごとに壁時計の飛びを検査し、スリープ復帰を検知したら APScheduler を起床させる。
+_WATCHDOG_INTERVAL = 30
+_WATCHDOG_TOLERANCE = _WATCHDOG_INTERVAL * 3  # この秒数以上の空白でスリープ復帰と判定
 
 # 曜日名 → weekday() の数値マッピング
 _DAY_NAME_TO_NUM: dict[str, int] = {
@@ -64,6 +73,10 @@ class Scheduler:
         self._on_job_a: Callable[[], None] | None = None
         self._on_job_b: Callable[[], None] | None = None
         self._started = False
+        # スリープ復帰監視
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread: threading.Thread | None = None
+        self._on_sleep_wake: Callable[[], None] | None = None
 
     def start(
         self,
@@ -88,6 +101,7 @@ class Scheduler:
 
         self._scheduler.start()
         self._started = True
+        self._start_watchdog()
         logger.info(
             "スケジューラを開始しました (タイムゾーン: %s, misfire猶予: %d秒)",
             self._local_tz,
@@ -97,6 +111,7 @@ class Scheduler:
     def stop(self) -> None:
         """スケジューラを停止する。"""
         if self._started:
+            self._stop_watchdog()
             self._scheduler.shutdown(wait=False)
             self._started = False
             logger.info("スケジューラを停止しました")
@@ -270,6 +285,56 @@ class Scheduler:
             finally:
                 self._running_b = False
 
+    # ─── スリープ復帰監視（ウォッチドッグ） ───
+
+    def set_on_sleep_wake(self, callback: Callable[[], None]) -> None:
+        """スリープ復帰検知時に呼ばれるコールバックを設定する。
+
+        Args:
+            callback: スリープ復帰時に呼ばれる関数。
+        """
+        self._on_sleep_wake = callback
+
+    def _start_watchdog(self) -> None:
+        """スリープ復帰監視スレッドを開始する。"""
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop, daemon=True, name="sleep-wake-watchdog",
+        )
+        self._watchdog_thread.start()
+        logger.debug("スリープ復帰監視を開始しました (間隔: %d秒)", _WATCHDOG_INTERVAL)
+
+    def _stop_watchdog(self) -> None:
+        """スリープ復帰監視スレッドを停止する。"""
+        self._watchdog_stop.set()
+        self._watchdog_thread = None
+
+    def _watchdog_loop(self) -> None:
+        """スリープ復帰監視のメインループ。
+
+        30秒ごとに壁時計をチェックし、大きな飛び（= スリープ復帰）を
+        検知したら APScheduler を強制起床させる。
+        Windows の WaitForSingleObjectEx はスリープ中の時間をカウントしないため、
+        APScheduler の Event.wait() が長時間タイムアウトの場合に復帰しない問題を回避する。
+        """
+        last_check = time.time()
+        while not self._watchdog_stop.wait(timeout=_WATCHDOG_INTERVAL):
+            now = time.time()
+            elapsed = now - last_check
+            if elapsed > _WATCHDOG_TOLERANCE:
+                logger.info(
+                    "スリープ復帰を検知しました (%.0f秒の空白)。"
+                    "スケジューラを起床させます",
+                    elapsed,
+                )
+                self._scheduler.wakeup()
+                if self._on_sleep_wake:
+                    try:
+                        self._on_sleep_wake()
+                    except Exception:
+                        logger.exception("スリープ復帰コールバックでエラーが発生しました")
+            last_check = now
+
     # ─── 起動時キャッチアップ ───
 
     def check_and_run_missed_jobs(
@@ -393,7 +458,8 @@ def _should_catchup(
         except ValueError:
             pass
 
-    # いずれかのスケジュールエントリで「今日該当 & 時刻超過 & 猶予内」ならTrue
+    # いずれかのスケジュールエントリで「今日該当 & 時刻超過」ならTrue
+    # 起動時キャッチアップは同一日であれば時間制限なし（APScheduler misfire とは独立）
     for entry in schedule_entries:
         days = _parse_day_of_week_set(entry.day_of_week)
         if today_weekday not in days:
@@ -409,13 +475,12 @@ def _should_catchup(
             continue  # まだ時刻が来ていない
 
         elapsed = (now - scheduled_dt).total_seconds()
-        if elapsed <= _MISFIRE_GRACE_TIME:
-            logger.debug(
-                "キャッチアップ対象: day_of_week=%s, hour=%s, minute=%s "
-                "(経過 %d 秒, 猶予 %d 秒)",
-                entry.day_of_week, entry.hour, entry.minute,
-                int(elapsed), _MISFIRE_GRACE_TIME,
-            )
-            return True
+        logger.debug(
+            "キャッチアップ対象: day_of_week=%s, hour=%s, minute=%s "
+            "(経過 %d 秒)",
+            entry.day_of_week, entry.hour, entry.minute,
+            int(elapsed),
+        )
+        return True
 
     return False
