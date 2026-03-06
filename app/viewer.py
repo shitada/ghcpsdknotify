@@ -21,6 +21,7 @@ import queue
 import re
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import ttk
 from typing import TYPE_CHECKING, Any
@@ -660,7 +661,16 @@ def _open_viewer_in_tk(
             quiz_panel.pack(fill=tk.X, side=tk.BOTTOM)
 
         # ── HTML レンダリングフレーム ──
-        html_frame = HtmlFrame(root, messages_enabled=False)
+        def _open_in_browser(url: str) -> None:
+            """http/https リンクをデフォルトブラウザで開く。"""
+            if url.startswith(("http://", "https://")):
+                webbrowser.open(url)
+            else:
+                html_frame.load_url(url)
+
+        html_frame = HtmlFrame(
+            root, messages_enabled=False, on_link_click=_open_in_browser,
+        )
         html_frame.load_html(html)
         html_frame.pack(fill=tk.BOTH, expand=True)
 
