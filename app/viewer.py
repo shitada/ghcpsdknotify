@@ -663,6 +663,7 @@ def _open_viewer_in_tk(
         # ── HTML レンダリングフレーム ──
         def _open_in_browser(url: str) -> None:
             """http/https リンクをデフォルトブラウザで開く。"""
+            logger.debug("リンククリック: %s", url)
             if url.startswith(("http://", "https://")):
                 webbrowser.open(url)
             else:
@@ -672,6 +673,8 @@ def _open_viewer_in_tk(
             root, messages_enabled=False, on_link_click=_open_in_browser,
         )
         html_frame.load_html(html)
+        # load_html 後に再設定して確実にコールバックを保持
+        html_frame._html.on_link_click = _open_in_browser
         html_frame.pack(fill=tk.BOTH, expand=True)
 
         # ── クイズ採点ハンドラ ──
