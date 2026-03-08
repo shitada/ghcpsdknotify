@@ -187,6 +187,16 @@ def extract_topic_keys(md_content: str) -> list[dict[str, str]]:
         m for m in all_matches if not _is_question_title(m.group(2).strip())
     ]
 
+    # フォールバック: 全マーカーが Q1/Q2 見出しに付いている場合は
+    # topic_key で重複除去して最初のマッチを使う
+    if not topic_matches and all_matches:
+        seen: set[str] = set()
+        for m in all_matches:
+            key = m.group(1).strip()
+            if key not in seen:
+                seen.add(key)
+                topic_matches.append(m)
+
     for i, match in enumerate(topic_matches):
         topic_key = match.group(1).strip()
         title = match.group(2).strip()
