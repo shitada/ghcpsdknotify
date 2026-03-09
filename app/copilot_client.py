@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import platform
 from typing import Any
 
 from copilot import CopilotClient
@@ -224,10 +225,12 @@ class CopilotClientWrapper:
             )
 
         # WorkIQ MCP 付きで試行
+        # Windows では npx.cmd を指定しないとサブプロセスが解決できない
+        npx_cmd = "npx.cmd" if platform.system() == "Windows" else "npx"
         mcp_servers: dict[str, Any] = {
             "workiq": {
                 "type": "stdio",
-                "command": "npx",
+                "command": npx_cmd,
                 "args": ["-y", "@microsoft/workiq", "mcp"],
                 "tools": ["*"],
             },
