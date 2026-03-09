@@ -179,3 +179,60 @@ class TestSendPrompt:
         with pytest.raises(RuntimeError):
             await wrapper._send_prompt("sys", "user", timeout=10)
         mock_session.destroy.assert_awaited()
+
+
+# ────────────────────────────────────────────
+# generate_briefing_a (WorkIQ MCP 設定)
+# ────────────────────────────────────────────
+
+class TestGenerateBriefingA:
+    async def test_workiq_disabled_skips_mcp(self, wrapper: CopilotClientWrapper):
+        """WorkIQ 無効時は mcp_servers なしで _send_prompt が呼ばれる。"""
+        wrapper._send_prompt = AsyncMock(return_value="briefing")
+        config = WorkIQMcpConfig(enabled=False)
+        result = await wrapper.generate_briefing_a("sys", "user", config)
+        assert result == "briefing"
+        # mcp_servers 引数がないこと（デフォルト None）
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        assert call_kwargs.get("mcp_servers") is None
+
+    async def test_workiq_enabled_uses_npx_cmd_on_windows(self, wrapper: CopilotClientWrapper):
+        """Windows 環境では npx.cmd が MCP コマンドに設定される。"""
+        wrapper._send_prompt = AsyncMock(return_value="briefing with workiq")
+        config = WorkIQMcpConfig(enabled=True)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            result = await wrapper.generate_briefing_a("sys", "user", config)
+        assert result == "briefing with workiq"
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        mcp = call_kwargs["mcp_servers"]
+        assert mcp["workiq"]["command"] == "npx.cmd"
+
+    async def test_workiq_enabled_uses_npx_on_non_windows(self, wrapper: CopilotClientWrapper):
+        """非 Windows 環境では npx が MCP コマンドに設定される。"""
+        wrapper._send_prompt = AsyncMock(return_value="briefing with workiq")
+        config = WorkIQMcpConfig(enabled=True)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Linux"
+            result = await wrapper.generate_briefing_a("sys", "user", config)
+        assert result == "briefing with workiq"
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        mcp = call_kwargs["mcp_servers"]
+        assert mcp["workiq"]["command"] == "npx"
+
+    async def test_workiq_fallback_on_timeout(self, wrapper: CopilotClientWrapper):
+        """WorkIQ 付きがタイムアウトした場合、MCP なしでフォールバックする。"""
+        call_count = 0
+
+        async def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if kwargs.get("mcp_servers"):
+                raise TimeoutError("timeout")
+            return "fallback result"
+
+        wrapper._send_prompt = AsyncMock(side_effect=side_effect)
+        config = WorkIQMcpConfig(enabled=True)
+        result = await wrapper.generate_briefing_a("sys", "user", config)
+        assert result == "fallback result"
+        assert call_count == 2
