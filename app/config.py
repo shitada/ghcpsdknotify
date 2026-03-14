@@ -55,6 +55,8 @@ class WorkIQMcpConfig:
 
     enabled: bool = False
     suppress_setup_prompt: bool = False
+    timeout: int = 60
+    max_retries: int = 1
 
 
 @dataclass
@@ -144,6 +146,8 @@ def _dict_to_workiq_mcp_config(d: dict[str, Any]) -> WorkIQMcpConfig:
     return WorkIQMcpConfig(
         enabled=bool(d.get("enabled", False)),
         suppress_setup_prompt=bool(d.get("suppress_setup_prompt", False)),
+        timeout=int(d.get("timeout", 60)),
+        max_retries=int(d.get("max_retries", 1)),
     )
 
 
@@ -227,6 +231,8 @@ def _app_config_to_dict(config: AppConfig) -> dict[str, Any]:
         "workiq_mcp": {
             "enabled": config.workiq_mcp.enabled,
             "suppress_setup_prompt": config.workiq_mcp.suppress_setup_prompt,
+            "timeout": config.workiq_mcp.timeout,
+            "max_retries": config.workiq_mcp.max_retries,
         },
         "notification": {
             "enabled": config.notification.enabled,

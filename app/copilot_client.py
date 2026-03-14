@@ -10,6 +10,9 @@ import asyncio
 import json
 import logging
 import platform
+import shutil
+import subprocess
+import time
 from typing import Any
 
 from copilot import CopilotClient
@@ -22,6 +25,55 @@ logger = logging.getLogger(__name__)
 # リトライ設定
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [5, 15, 45]  # 指数バックオフ（秒）
+
+
+def _diagnose_workiq_failure() -> None:
+    """WorkIQ MCP 失敗時の診断情報をログに記録する。"""
+    npx_cmd = "npx.cmd" if platform.system() == "Windows" else "npx"
+
+    # 1. npx コマンドの存在確認
+    npx_path = shutil.which(npx_cmd)
+    if npx_path:
+        logger.info("[WorkIQ診断] npx パス: %s", npx_path)
+    else:
+        logger.warning("[WorkIQ診断] npx がPATHに見つかりません")
+        return
+
+    # 2. npx --version で動作確認
+    try:
+        proc = subprocess.run(
+            [npx_cmd, "--version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        logger.info(
+            "[WorkIQ診断] npx --version: %s (exit=%d)",
+            proc.stdout.strip(), proc.returncode,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("[WorkIQ診断] npx --version がタイムアウト (15秒)")
+    except Exception as e:
+        logger.warning("[WorkIQ診断] npx --version 実行エラー: %s", e)
+
+    # 3. ネットワーク接続テスト（GitHub API）
+    try:
+        import urllib.request
+        start = time.monotonic()
+        req = urllib.request.Request(
+            "https://api.github.com/zen",
+            headers={"User-Agent": "ghcpsdknotify-diag"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            elapsed = time.monotonic() - start
+            logger.info(
+                "[WorkIQ診断] GitHub API 接続OK (%d, %.1f秒)",
+                resp.status, elapsed,
+            )
+    except Exception as e:
+        elapsed = time.monotonic() - start
+        logger.warning(
+            "[WorkIQ診断] GitHub API 接続失敗 (%.1f秒): %s",
+            elapsed, e,
+        )
 
 
 class CopilotClientWrapper:
@@ -75,15 +127,17 @@ class CopilotClientWrapper:
         *,
         timeout: float,
         operation_name: str = "SDK呼び出し",
+        max_retries: int = _MAX_RETRIES,
     ) -> Any:
         """リトライ付きで非同期コルーチンを実行する。
 
-        指数バックオフ（5s→15s→45s、最大3回）でリトライする。
+        指数バックオフでリトライする。
 
         Args:
             coro_factory: リトライごとに呼ばれるコルーチンファクトリ（引数なし）。
             timeout: タイムアウト（秒）。
             operation_name: ログ用の操作名。
+            max_retries: 最大リトライ回数（デフォルト: 3）。
 
         Returns:
             コルーチンの戻り値。
@@ -93,7 +147,7 @@ class CopilotClientWrapper:
         """
         last_error: Exception | None = None
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(max_retries):
             try:
                 result = await asyncio.wait_for(
                     coro_factory(),
@@ -112,7 +166,7 @@ class CopilotClientWrapper:
                     "%s: タイムアウト (試行 %d/%d)",
                     operation_name,
                     attempt + 1,
-                    _MAX_RETRIES,
+                    max_retries,
                 )
             except Exception as e:
                 last_error = e
@@ -120,17 +174,17 @@ class CopilotClientWrapper:
                     "%s: エラー (試行 %d/%d) — %s",
                     operation_name,
                     attempt + 1,
-                    _MAX_RETRIES,
+                    max_retries,
                     e,
                 )
 
             # 最終試行以外はバックオフ待機
-            if attempt < _MAX_RETRIES - 1:
-                delay = _RETRY_DELAYS[attempt]
+            if attempt < max_retries - 1:
+                delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                 logger.info("%s: %d秒後にリトライします", operation_name, delay)
                 await asyncio.sleep(delay)
 
-        logger.error("%s: 全 %d 回のリトライに失敗しました", operation_name, _MAX_RETRIES)
+        logger.error("%s: 全 %d 回のリトライに失敗しました", operation_name, max_retries)
         raise last_error  # type: ignore[misc]
 
     async def _send_prompt(
@@ -141,6 +195,7 @@ class CopilotClientWrapper:
         timeout: float,
         mcp_servers: dict[str, Any] | None = None,
         operation_name: str = "ブリーフィング生成",
+        max_retries: int = _MAX_RETRIES,
     ) -> str:
         """プロンプトを送信してレスポンスのテキストを返す。
 
@@ -173,12 +228,23 @@ class CopilotClientWrapper:
             if mcp_servers:
                 session_config["mcp_servers"] = mcp_servers
 
-            # セッション作成・メッセージ送信
+            # セッション作成・メッセージ送信（フェーズ別タイミング記録）
+            t0 = time.monotonic()
             session = await client.create_session(session_config)  # type: ignore[arg-type]
+            t1 = time.monotonic()
+            logger.info(
+                "%s: create_session 完了 (%.1f秒, MCP=%s)",
+                operation_name, t1 - t0, "あり" if mcp_servers else "なし",
+            )
             try:
                 response = await session.send_and_wait(
                     {"prompt": user_prompt},
                     timeout=timeout,
+                )
+                t2 = time.monotonic()
+                logger.info(
+                    "%s: send_and_wait 完了 (%.1f秒)",
+                    operation_name, t2 - t1,
                 )
 
                 if response and hasattr(response, "data") and hasattr(response.data, "content"):
@@ -193,6 +259,7 @@ class CopilotClientWrapper:
             _execute,
             timeout=timeout + 30,  # リトライ用にタイムアウトにマージンを追加
             operation_name=operation_name,
+            max_retries=max_retries,
         )
 
     async def generate_briefing_a(
@@ -224,7 +291,7 @@ class CopilotClientWrapper:
                 operation_name="機能A ブリーフィング生成",
             )
 
-        # WorkIQ MCP 付きで試行
+        # WorkIQ MCP 付きで試行（専用の短いタイムアウト・少ないリトライ回数）
         # Windows では npx.cmd を指定しないとサブプロセスが解決できない
         npx_cmd = "npx.cmd" if platform.system() == "Windows" else "npx"
         mcp_servers: dict[str, Any] = {
@@ -235,15 +302,22 @@ class CopilotClientWrapper:
                 "tools": ["*"],
             },
         }
-        logger.info("WorkIQ MCP を登録 (stdio)")
+        workiq_timeout = workiq_config.timeout
+        workiq_max_retries = workiq_config.max_retries
+        logger.info(
+            "WorkIQ MCP を登録 (stdio) — timeout=%ds, max_retries=%d",
+            workiq_timeout,
+            workiq_max_retries,
+        )
 
         try:
             return await self._send_prompt(
                 system_prompt,
                 user_prompt,
-                timeout=self._sdk_config.sdk_timeout,
+                timeout=workiq_timeout,
                 mcp_servers=mcp_servers,
                 operation_name="機能A ブリーフィング生成 (WorkIQ付き)",
+                max_retries=workiq_max_retries,
             )
         except (TimeoutError, Exception) as e:
             logger.warning(
@@ -251,6 +325,11 @@ class CopilotClientWrapper:
                 "WorkIQ MCP なしでフォールバックします",
                 e,
             )
+            # 診断情報を収集
+            try:
+                _diagnose_workiq_failure()
+            except Exception as diag_err:
+                logger.debug("WorkIQ 診断でエラー: %s", diag_err)
 
         # フォールバック: WorkIQ MCP なしで再試行
         return await self._send_prompt(

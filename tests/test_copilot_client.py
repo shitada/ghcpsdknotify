@@ -92,6 +92,32 @@ class TestCallWithRetry:
             await wrapper._call_with_retry(factory, timeout=5, operation_name="test")
         assert factory.call_count == 3
 
+    async def test_custom_max_retries_1(self, wrapper: CopilotClientWrapper):
+        """max_retries=1 の場合、リトライせず即座に失敗する。"""
+        factory = AsyncMock(side_effect=RuntimeError("fail once"))
+        with pytest.raises(RuntimeError, match="fail once"):
+            await wrapper._call_with_retry(
+                factory, timeout=5, operation_name="test", max_retries=1
+            )
+        assert factory.call_count == 1
+
+    async def test_custom_max_retries_2(self, wrapper: CopilotClientWrapper):
+        """max_retries=2 の場合、最大2回試行する。"""
+        call_count = 0
+
+        async def factory():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise RuntimeError("fail")
+            return "recovered"
+
+        result = await wrapper._call_with_retry(
+            factory, timeout=5, operation_name="test", max_retries=2
+        )
+        assert result == "recovered"
+        assert call_count == 2
+
 
 # ────────────────────────────────────────────
 # check_license
@@ -236,3 +262,43 @@ class TestGenerateBriefingA:
         result = await wrapper.generate_briefing_a("sys", "user", config)
         assert result == "fallback result"
         assert call_count == 2
+
+    async def test_workiq_uses_dedicated_timeout(self, wrapper: CopilotClientWrapper):
+        """WorkIQ 有効時は workiq_config.timeout が使われる。"""
+        wrapper._send_prompt = AsyncMock(return_value="briefing with workiq")
+        config = WorkIQMcpConfig(enabled=True, timeout=45)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            await wrapper.generate_briefing_a("sys", "user", config)
+        # WorkIQ 付き呼び出しの timeout が 45 であること
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        assert call_kwargs["timeout"] == 45
+
+    async def test_workiq_uses_dedicated_max_retries(self, wrapper: CopilotClientWrapper):
+        """WorkIQ 有効時は workiq_config.max_retries が使われる。"""
+        wrapper._send_prompt = AsyncMock(return_value="briefing with workiq")
+        config = WorkIQMcpConfig(enabled=True, max_retries=2)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            await wrapper.generate_briefing_a("sys", "user", config)
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        assert call_kwargs["max_retries"] == 2
+
+    async def test_workiq_single_retry_fallback_fast(self, wrapper: CopilotClientWrapper):
+        """max_retries=1 の場合、WorkIQ 失敗後すぐにフォールバックする。"""
+        calls = []
+
+        async def side_effect(*args, **kwargs):
+            calls.append(kwargs.get("operation_name", ""))
+            if kwargs.get("mcp_servers"):
+                raise TimeoutError("timeout")
+            return "fallback result"
+
+        wrapper._send_prompt = AsyncMock(side_effect=side_effect)
+        config = WorkIQMcpConfig(enabled=True, timeout=30, max_retries=1)
+        result = await wrapper.generate_briefing_a("sys", "user", config)
+        assert result == "fallback result"
+        # WorkIQ 付き1回 + フォールバック1回 = 合計2回
+        assert len(calls) == 2
+        assert "WorkIQ" in calls[0]
+        assert "フォールバック" in calls[1]
