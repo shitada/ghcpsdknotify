@@ -55,7 +55,7 @@ class WorkIQMcpConfig:
 
     enabled: bool = False
     suppress_setup_prompt: bool = False
-    timeout: int = 60
+    timeout: int = 600
     max_retries: int = 1
 
 
