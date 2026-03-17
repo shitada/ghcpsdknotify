@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [5, 15, 45]  # 指数バックオフ（秒）
 
+# CopilotClient.start() リトライ設定
+_START_MAX_RETRIES = 3
+_START_RETRY_DELAY = 5  # 秒
+
 
 def _diagnose_workiq_failure() -> None:
     """WorkIQ MCP 失敗時の診断情報をログに記録する。"""
@@ -93,11 +97,33 @@ class CopilotClientWrapper:
         self._client: CopilotClient | None = None
 
     async def __aenter__(self) -> CopilotClientWrapper:
-        """非同期コンテキストマネージャのエントリ。CopilotClient を起動する。"""
-        self._client = CopilotClient()
-        await self._client.start()
-        logger.info("CopilotClient を起動しました")
-        return self
+        """非同期コンテキストマネージャのエントリ。CopilotClient を起動する。
+
+        start() が失敗した場合、最大3回リトライする（5秒間隔）。
+        """
+        last_error: Exception | None = None
+        for attempt in range(_START_MAX_RETRIES):
+            self._client = CopilotClient()
+            try:
+                await self._client.start()
+                logger.info("CopilotClient を起動しました")
+                return self
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "CopilotClient 起動失敗 (試行 %d/%d): %s",
+                    attempt + 1, _START_MAX_RETRIES, e,
+                )
+                # 失敗したクライアントを停止
+                try:
+                    await self._client.stop()
+                except Exception:
+                    pass
+                self._client = None
+                if attempt < _START_MAX_RETRIES - 1:
+                    await asyncio.sleep(_START_RETRY_DELAY)
+
+        raise last_error  # type: ignore[misc]
 
     async def __aexit__(
         self,

@@ -49,6 +49,35 @@ class TestContextManager:
                 mock_instance.start.assert_awaited_once()
             mock_instance.stop.assert_awaited_once()
 
+    async def test_start_retries_on_failure(self, sdk_config: CopilotSdkConfig):
+        """start() が失敗しても最大3回リトライして成功する。"""
+        call_count = 0
+
+        async def start_side_effect():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise TimeoutError("ping timeout")
+
+        with patch("app.copilot_client.CopilotClient") as MockCls:
+            mock_instance = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=start_side_effect)
+            MockCls.return_value = mock_instance
+            async with CopilotClientWrapper(sdk_config) as w:
+                assert w._client is mock_instance
+            assert call_count == 3
+
+    async def test_start_raises_after_max_retries(self, sdk_config: CopilotSdkConfig):
+        """start() が全リトライ失敗した場合、例外が発生する。"""
+        with patch("app.copilot_client.CopilotClient") as MockCls:
+            mock_instance = AsyncMock()
+            mock_instance.start = AsyncMock(side_effect=TimeoutError("ping timeout"))
+            MockCls.return_value = mock_instance
+            with pytest.raises(TimeoutError, match="ping timeout"):
+                async with CopilotClientWrapper(sdk_config):
+                    pass
+            assert mock_instance.start.await_count == 3
+
 
 # ────────────────────────────────────────────
 # _ensure_client
