@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from copilot import CopilotClient
+from copilot.session import SessionEventType
 
 from app.config import CopilotSdkConfig, WorkIQMcpConfig
 from app.i18n import get_language
@@ -263,6 +264,51 @@ class CopilotClientWrapper:
                 operation_name, t1 - t0, "あり" if mcp_servers else "なし",
             )
             try:
+                # ツール呼び出しイベントをログに記録
+                def _on_session_event(event: Any) -> None:
+                    try:
+                        etype = getattr(event, "type", None)
+                        data = getattr(event, "data", None)
+                        if etype == SessionEventType.TOOL_EXECUTION_START:
+                            tool = getattr(data, "tool_name", None) or "unknown"
+                            mcp_srv = getattr(data, "mcp_server_name", None)
+                            mcp_tool = getattr(data, "mcp_tool_name", None)
+                            if mcp_srv:
+                                logger.info(
+                                    "%s: [ツール開始] %s (MCP: %s/%s)",
+                                    operation_name, tool, mcp_srv, mcp_tool,
+                                )
+                            else:
+                                logger.info(
+                                    "%s: [ツール開始] %s",
+                                    operation_name, tool,
+                                )
+                        elif etype == SessionEventType.TOOL_EXECUTION_COMPLETE:
+                            tool = getattr(data, "tool_name", None) or "unknown"
+                            mcp_srv = getattr(data, "mcp_server_name", None)
+                            result = getattr(data, "result", None)
+                            # result の概要のみ記録（長大な結果はトリミング）
+                            result_summary = ""
+                            if result is not None:
+                                result_str = str(result)
+                                result_summary = result_str[:200]
+                                if len(result_str) > 200:
+                                    result_summary += f"... ({len(result_str)} chars)"
+                            if mcp_srv:
+                                logger.info(
+                                    "%s: [ツール完了] %s (MCP: %s) → %s",
+                                    operation_name, tool, mcp_srv, result_summary,
+                                )
+                            else:
+                                logger.info(
+                                    "%s: [ツール完了] %s → %s",
+                                    operation_name, tool, result_summary,
+                                )
+                    except Exception:
+                        pass  # イベントログでエラーを起こさない
+
+                session.on(_on_session_event)
+
                 response = await session.send_and_wait(
                     {"prompt": user_prompt},
                     timeout=timeout,
