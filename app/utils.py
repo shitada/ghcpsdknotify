@@ -197,6 +197,18 @@ def extract_topic_keys(md_content: str) -> list[dict[str, str]]:
                 seen.add(key)
                 topic_matches.append(m)
 
+    # 同じ topic_key が複数回出現する場合（Q1/Q2 の各セクションに
+    # topic_key コメントが付いているケース）は最初のものだけ残す
+    if topic_matches:
+        deduped: list[re.Match[str]] = []
+        seen_keys: set[str] = set()
+        for m in topic_matches:
+            key = m.group(1).strip()
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(m)
+        topic_matches = deduped
+
     for i, match in enumerate(topic_matches):
         topic_key = match.group(1).strip()
         title = match.group(2).strip()
