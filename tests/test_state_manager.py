@@ -72,11 +72,16 @@ class TestStateManagerMutations:
         sm.increment_run_count("b")
         assert sm.state.run_count_b == 1
 
+    def test_increment_run_count_c(self):
+        sm = self._make_sm()
+        sm.increment_run_count("c")
+        assert sm.state.run_count_c == 1
+
     def test_increment_invalid_feature_raises(self):
         sm = self._make_sm()
         import pytest
         with pytest.raises(ValueError):
-            sm.increment_run_count("c")
+            sm.increment_run_count("x")
 
     def test_update_last_run(self):
         sm = self._make_sm()

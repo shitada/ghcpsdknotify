@@ -348,7 +348,12 @@ def notify_error(
         error_message: エラーの概要メッセージ。
         notification_config: 通知設定。
     """
-    label = t("notify.error_label_news") if feature == "a" else t("notify.error_label_quiz")
+    if feature == "a":
+        label = t("notify.error_label_news")
+    elif feature == "c":
+        label = t("notify.error_label_monitor")
+    else:
+        label = t("notify.error_label_quiz")
     title = t("notify.error_title", label=label)
     # エラーメッセージを短く切り詰め（トーストは表示領域が限られる）
     short_err = error_message[:120] if len(error_message) > 120 else error_message

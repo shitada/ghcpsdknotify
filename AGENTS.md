@@ -138,7 +138,7 @@ mcp_servers = {
     "workiq": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "@microsoft/workiq", "mcp"],
+        "args": ["-y", "@microsoft/workiq@0.2.8", "mcp"],
         "tools": ["*"],
     },
 }

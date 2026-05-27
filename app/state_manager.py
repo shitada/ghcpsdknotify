@@ -17,6 +17,12 @@ from app.utils import atomic_write, safe_read_with_fallback
 
 logger = logging.getLogger(__name__)
 
+# 遅延インポートで循環参照を回避
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.page_monitor import PageMonitorEntry
+
 # デフォルトの state.json パス（settings ディレクトリ配下）
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent.parent / "settings" / "state.json"
 
@@ -58,13 +64,16 @@ class AppState:
 
     run_count_a: int = 0
     run_count_b: int = 0
+    run_count_c: int = 0
     last_run_at: str = ""
     last_run_a_at: str = ""
     last_run_b_at: str = ""
+    last_run_c_at: str = ""
     output_folder_path: str = ""
     random_pick_history: list[str] = field(default_factory=list)
     pending_quizzes: list[PendingQuiz] = field(default_factory=list)
     quiz_history: dict[str, QuizHistoryEntry] = field(default_factory=dict)
+    page_monitor_state: dict[str, Any] = field(default_factory=dict)
 
 
 # ── パース / シリアライズヘルパー ──
@@ -106,13 +115,31 @@ def _dict_to_app_state(d: dict[str, Any]) -> AppState:
     """辞書から AppState を生成する。"""
     pending_raw = d.get("pending_quizzes", [])
     history_raw = d.get("quiz_history", {})
+    pm_state_raw = d.get("page_monitor_state", {})
+
+    # page_monitor_state の復元
+    pm_state: dict[str, Any] = {}
+    if isinstance(pm_state_raw, dict) and pm_state_raw:
+        from app.page_monitor import PageMonitorEntry
+
+        for url, entry_dict in pm_state_raw.items():
+            if isinstance(entry_dict, dict):
+                pm_state[url] = PageMonitorEntry(
+                    content_hash=str(entry_dict.get("content_hash", "")),
+                    known_links=list(entry_dict.get("known_links", [])),
+                    last_checked_at=str(entry_dict.get("last_checked_at", "")),
+                )
+            else:
+                pm_state[url] = entry_dict
 
     return AppState(
         run_count_a=int(d.get("run_count_a", 0)),
         run_count_b=int(d.get("run_count_b", 0)),
+        run_count_c=int(d.get("run_count_c", 0)),
         last_run_at=str(d.get("last_run_at", "")),
         last_run_a_at=str(d.get("last_run_a_at", "")),
         last_run_b_at=str(d.get("last_run_b_at", "")),
+        last_run_c_at=str(d.get("last_run_c_at", "")),
         output_folder_path=str(d.get("output_folder_path", "")),
         random_pick_history=list(d.get("random_pick_history", [])),
         pending_quizzes=[_dict_to_pending_quiz(p) for p in pending_raw] if isinstance(pending_raw, list) else [],
@@ -120,6 +147,7 @@ def _dict_to_app_state(d: dict[str, Any]) -> AppState:
             k: _dict_to_quiz_history_entry(v)
             for k, v in history_raw.items()
         } if isinstance(history_raw, dict) else {},
+        page_monitor_state=pm_state,
     )
 
 
@@ -156,18 +184,33 @@ def _pending_quiz_to_dict(pq: PendingQuiz) -> dict[str, Any]:
 
 def _app_state_to_dict(state: AppState) -> dict[str, Any]:
     """AppState を辞書に変換する。"""
+    # page_monitor_state のシリアライズ
+    pm_state_dict: dict[str, Any] = {}
+    for url, entry in state.page_monitor_state.items():
+        if hasattr(entry, "content_hash"):
+            pm_state_dict[url] = {
+                "content_hash": entry.content_hash,
+                "known_links": entry.known_links,
+                "last_checked_at": entry.last_checked_at,
+            }
+        else:
+            pm_state_dict[url] = entry
+
     return {
         "run_count_a": state.run_count_a,
         "run_count_b": state.run_count_b,
+        "run_count_c": state.run_count_c,
         "last_run_at": state.last_run_at,
         "last_run_a_at": state.last_run_a_at,
         "last_run_b_at": state.last_run_b_at,
+        "last_run_c_at": state.last_run_c_at,
         "output_folder_path": state.output_folder_path,
         "random_pick_history": state.random_pick_history,
         "pending_quizzes": [_pending_quiz_to_dict(p) for p in state.pending_quizzes],
         "quiz_history": {
             k: _quiz_history_entry_to_dict(v) for k, v in state.quiz_history.items()
         },
+        "page_monitor_state": pm_state_dict,
     }
 
 
@@ -234,7 +277,7 @@ class StateManager:
         """実行カウンタをインクリメントする。
 
         Args:
-            feature: "a" または "b"。
+            feature: "a"、"b"、または "c"。
         """
         if feature == "a":
             self._state.run_count_a += 1
@@ -242,8 +285,11 @@ class StateManager:
         elif feature == "b":
             self._state.run_count_b += 1
             logger.debug("run_count_b = %d", self._state.run_count_b)
+        elif feature == "c":
+            self._state.run_count_c += 1
+            logger.debug("run_count_c = %d", self._state.run_count_c)
         else:
-            raise ValueError(f"不正な feature 値: {feature!r} （'a' または 'b' を指定）")
+            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、または 'c' を指定）")
 
     def update_last_run(self) -> None:
         """最終実行日時を現在時刻に更新する。"""
@@ -254,7 +300,7 @@ class StateManager:
         """機能別の最終実行日時を現在時刻に更新する。
 
         Args:
-            feature: "a" または "b"。
+            feature: "a"、"b"、または "c"。
         """
         now_iso = datetime.now().isoformat(timespec="seconds")
         if feature == "a":
@@ -263,8 +309,21 @@ class StateManager:
         elif feature == "b":
             self._state.last_run_b_at = now_iso
             logger.debug("last_run_b_at = %s", now_iso)
+        elif feature == "c":
+            self._state.last_run_c_at = now_iso
+            logger.debug("last_run_c_at = %s", now_iso)
         else:
-            raise ValueError(f"不正な feature 値: {feature!r} （'a' または 'b' を指定）")
+            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、または 'c' を指定）")
+
+    def update_page_monitor_state(self, url: str, entry: PageMonitorEntry) -> None:
+        """ページモニターの状態を更新する。
+
+        Args:
+            url: 監視対象ページの URL。
+            entry: 更新する PageMonitorEntry。
+        """
+        self._state.page_monitor_state[url] = entry
+        logger.debug("page_monitor_state 更新: %s", url)
 
     def set_output_folder_path(self, path: str) -> None:
         """出力フォルダパスを設定する。

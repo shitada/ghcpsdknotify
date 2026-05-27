@@ -32,6 +32,7 @@ _MISFIRE_GRACE_TIME = 54000
 # ジョブ ID
 _JOB_A_PREFIX = "job_a"
 _JOB_B_PREFIX = "job_b"
+_JOB_C_PREFIX = "job_c"
 
 # スリープ復帰監視の間隔（秒）
 # Windows の WaitForSingleObjectEx はスリープ中の時間をカウントしないため、
@@ -68,10 +69,13 @@ class Scheduler:
         )
         self._lock_a = threading.Lock()
         self._lock_b = threading.Lock()
+        self._lock_c = threading.Lock()
         self._running_a = False
         self._running_b = False
+        self._running_c = False
         self._on_job_a: Callable[[], None] | None = None
         self._on_job_b: Callable[[], None] | None = None
+        self._on_job_c: Callable[[], None] | None = None
         self._started = False
         # スリープ復帰監視
         self._watchdog_stop = threading.Event()
@@ -83,18 +87,21 @@ class Scheduler:
         config: AppConfig,
         on_job_a: Callable[[], None],
         on_job_b: Callable[[], None],
+        on_job_c: Callable[[], None] | None = None,
     ) -> None:
         """スケジューラを開始する。
 
-        config のスケジュール設定に基づき、機能 A・B のジョブを登録して開始する。
+        config のスケジュール設定に基づき、機能 A・B・C のジョブを登録して開始する。
 
         Args:
             config: アプリケーション設定。
             on_job_a: 機能 A のジョブコールバック。
             on_job_b: 機能 B のジョブコールバック。
+            on_job_c: 機能 C のジョブコールバック。
         """
         self._on_job_a = on_job_a
         self._on_job_b = on_job_b
+        self._on_job_c = on_job_c
 
         # スケジュールジョブの登録
         self._register_jobs(config)
@@ -136,18 +143,21 @@ class Scheduler:
         features: list[str],
         on_job_a: Callable[[], None] | None = None,
         on_job_b: Callable[[], None] | None = None,
+        on_job_c: Callable[[], None] | None = None,
     ) -> None:
         """指定機能を即座に手動実行する。
 
-        両方の場合は A → B の順で順次実行する。
+        複数の場合は A → B → C の順で順次実行する。
 
         Args:
-            features: 実行する機能のリスト（"a", "b"）。
+            features: 実行する機能のリスト（"a", "b", "c"）。
             on_job_a: 機能 A のコールバック（None の場合は登録済みを使用）。
             on_job_b: 機能 B のコールバック（None の場合は登録済みを使用）。
+            on_job_c: 機能 C のコールバック（None の場合は登録済みを使用）。
         """
         job_a = on_job_a or self._on_job_a
         job_b = on_job_b or self._on_job_b
+        job_c = on_job_c or self._on_job_c
 
         if "a" in features and job_a:
             logger.info("手動実行: 機能 A を開始")
@@ -156,6 +166,10 @@ class Scheduler:
         if "b" in features and job_b:
             logger.info("手動実行: 機能 B を開始")
             self._execute_job_b_wrapper(job_b)
+
+        if "c" in features and job_c:
+            logger.info("手動実行: 機能 C を開始")
+            self._execute_job_c_wrapper(job_c)
 
     def _register_jobs(self, config: AppConfig) -> None:
         """config のスケジュール設定に基づきジョブを登録する。"""
@@ -193,11 +207,28 @@ class Scheduler:
                 entry.hour,
             )
 
+        for i, entry in enumerate(config.schedule.feature_c):
+            job_id = f"{_JOB_C_PREFIX}_{i}"
+            trigger = self._create_trigger(entry)
+            self._scheduler.add_job(
+                self._on_trigger_c,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+                name=f"機能C (schedule {i})",
+            )
+            logger.info(
+                "機能C ジョブ登録: %s (day_of_week=%s, hour=%s)",
+                job_id,
+                entry.day_of_week,
+                entry.hour,
+            )
+
     def _remove_all_jobs(self) -> None:
-        """登録済みの A/B ジョブをすべて削除する。"""
+        """登録済みの A/B/C ジョブをすべて削除する。"""
         jobs = self._scheduler.get_jobs()
         for job in jobs:
-            if job.id.startswith(_JOB_A_PREFIX) or job.id.startswith(_JOB_B_PREFIX):
+            if job.id.startswith(_JOB_A_PREFIX) or job.id.startswith(_JOB_B_PREFIX) or job.id.startswith(_JOB_C_PREFIX):
                 self._scheduler.remove_job(job.id)
                 logger.debug("ジョブ削除: %s", job.id)
 
@@ -264,8 +295,14 @@ class Scheduler:
             self._execute_job_b_wrapper(self._on_job_b)
 
     def _execute_job_a_wrapper(self, callback: Callable[[], None]) -> None:
-        """機能 A のジョブを排他制御付きで実行する。"""
-        with self._lock_a:
+        """機能 A のジョブを排他制御付きで実行する。
+
+        既に実行中の場合はスキップする（スリープ復帰時の二重起動防止）。
+        """
+        if not self._lock_a.acquire(blocking=False):
+            logger.warning("機能 A は既に実行中のためスキップします（二重起動防止）")
+            return
+        try:
             self._running_a = True
             try:
                 callback()
@@ -273,10 +310,18 @@ class Scheduler:
                 logger.exception("機能 A の実行中にエラーが発生しました")
             finally:
                 self._running_a = False
+        finally:
+            self._lock_a.release()
 
     def _execute_job_b_wrapper(self, callback: Callable[[], None]) -> None:
-        """機能 B のジョブを排他制御付きで実行する。"""
-        with self._lock_b:
+        """機能 B のジョブを排他制御付きで実行する。
+
+        既に実行中の場合はスキップする（スリープ復帰時の二重起動防止）。
+        """
+        if not self._lock_b.acquire(blocking=False):
+            logger.warning("機能 B は既に実行中のためスキップします（二重起動防止）")
+            return
+        try:
             self._running_b = True
             try:
                 callback()
@@ -284,6 +329,50 @@ class Scheduler:
                 logger.exception("機能 B の実行中にエラーが発生しました")
             finally:
                 self._running_b = False
+        finally:
+            self._lock_b.release()
+
+    def _on_trigger_c(self) -> None:
+        """機能 C のスケジュールトリガーハンドラ。
+
+        機能 A または B が実行中の場合は 3 分後にリスケジュールする。
+        """
+        if self._running_a or self._running_b:
+            defer_time = datetime.now() + timedelta(seconds=_DEFER_SECONDS)
+            logger.info(
+                "機能 A/B が実行中のため、機能 C を %s に遅延実行します",
+                defer_time.strftime("%H:%M:%S"),
+            )
+            self._scheduler.add_job(
+                self._on_trigger_c,
+                trigger=DateTrigger(run_date=defer_time),
+                id="job_c_deferred",
+                replace_existing=True,
+                name="機能C (遅延実行)",
+            )
+            return
+
+        if self._on_job_c:
+            self._execute_job_c_wrapper(self._on_job_c)
+
+    def _execute_job_c_wrapper(self, callback: Callable[[], None]) -> None:
+        """機能 C のジョブを排他制御付きで実行する。
+
+        既に実行中の場合はスキップする（スリープ復帰時の二重起動防止）。
+        """
+        if not self._lock_c.acquire(blocking=False):
+            logger.warning("機能 C は既に実行中のためスキップします（二重起動防止）")
+            return
+        try:
+            self._running_c = True
+            try:
+                callback()
+            except Exception:
+                logger.exception("機能 C の実行中にエラーが発生しました")
+            finally:
+                self._running_c = False
+        finally:
+            self._lock_c.release()
 
     # ─── スリープ復帰監視（ウォッチドッグ） ───
 
@@ -342,6 +431,7 @@ class Scheduler:
         config: AppConfig,
         last_run_a_at: str,
         last_run_b_at: str,
+        last_run_c_at: str = "",
     ) -> None:
         """起動時に見逃されたジョブをチェックし、misfire 猶予内であれば即実行する。
 
@@ -352,15 +442,17 @@ class Scheduler:
             config: アプリケーション設定。
             last_run_a_at: 機能 A の最終実行日時（ISO 形式）。空文字は未実行。
             last_run_b_at: 機能 B の最終実行日時（ISO 形式）。空文字は未実行。
+            last_run_c_at: 機能 C の最終実行日時（ISO 形式）。空文字は未実行。
         """
         now = datetime.now()
         today = now.date()
         today_weekday = today.weekday()
 
-        # 機能 A のキャッチアップ
-        if self._on_job_a and _should_catchup(
+        # 機能 A のキャッチアップ（実行中の場合はスケジュール済みとみなしてスキップ）
+        a_has_catchup = self._on_job_a and not self._running_a and _should_catchup(
             config.schedule.feature_a, today_weekday, now, last_run_a_at,
-        ):
+        )
+        if a_has_catchup:
             logger.info(
                 "起動時キャッチアップ: 機能 A のスケジュール時刻を逃しています。即時実行します"
             )
@@ -372,14 +464,12 @@ class Scheduler:
                 name="機能A (起動時キャッチアップ)",
             )
 
-        # 機能 B のキャッチアップ
-        if self._on_job_b and _should_catchup(
+        # 機能 B のキャッチアップ（実行中の場合はスケジュール済みとみなしてスキップ）
+        b_has_catchup = self._on_job_b and not self._running_b and _should_catchup(
             config.schedule.feature_b, today_weekday, now, last_run_b_at,
-        ):
+        )
+        if b_has_catchup:
             # 機能 A のキャッチアップがある場合は 5 分遅延して重複を回避
-            a_has_catchup = self._on_job_a and _should_catchup(
-                config.schedule.feature_a, today_weekday, now, last_run_a_at,
-            )
             delay = _DEFER_SECONDS + 10 if a_has_catchup else 10
             logger.info(
                 "起動時キャッチアップ: 機能 B のスケジュール時刻を逃しています。%d秒後に実行します",
@@ -391,6 +481,25 @@ class Scheduler:
                 id="job_b_catchup",
                 replace_existing=True,
                 name="機能B (起動時キャッチアップ)",
+            )
+
+        # 機能 C のキャッチアップ（実行中の場合はスケジュール済みとみなしてスキップ）
+        if self._on_job_c and not self._running_c and _should_catchup(
+            config.schedule.feature_c, today_weekday, now, last_run_c_at,
+        ):
+            # A/B のキャッチアップがある場合はさらに遅延して重複を回避
+            prior_catchups = sum([bool(a_has_catchup), bool(b_has_catchup)])
+            delay = (_DEFER_SECONDS * prior_catchups) + 10 if prior_catchups else 10
+            logger.info(
+                "起動時キャッチアップ: 機能 C のスケジュール時刻を逃しています。%d秒後に実行します",
+                delay,
+            )
+            self._scheduler.add_job(
+                self._on_trigger_c,
+                trigger=DateTrigger(run_date=now + timedelta(seconds=delay)),
+                id="job_c_catchup",
+                replace_existing=True,
+                name="機能C (起動時キャッチアップ)",
             )
 
 

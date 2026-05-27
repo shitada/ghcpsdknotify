@@ -31,6 +31,10 @@ _RETRY_DELAYS = [5, 15, 45]  # 指数バックオフ（秒）
 _START_MAX_RETRIES = 3
 _START_RETRY_DELAY = 5  # 秒
 
+# WorkIQ latest (0.4.x) is currently blocked by Entra token protection in this tenant.
+# Marketplace-pinned 0.2.8 works with the existing WorkIQ CLI auth cache.
+_WORKIQ_MCP_PACKAGE = "@microsoft/workiq@0.2.8"
+
 
 def _diagnose_workiq_failure() -> None:
     """WorkIQ MCP 失敗時の診断情報をログに記録する。"""
@@ -370,15 +374,15 @@ class CopilotClientWrapper:
             "workiq": {
                 "type": "stdio",
                 "command": npx_cmd,
-                "args": ["-y", "@microsoft/workiq", "mcp"],
+                "args": ["-y", _WORKIQ_MCP_PACKAGE, "mcp"],
                 "tools": ["*"],
             },
         }
         workiq_timeout = workiq_config.timeout
         workiq_max_retries = workiq_config.max_retries
         logger.info(
-            "WorkIQ MCP を登録 (stdio) — timeout=%ds, max_retries=%d",
-            workiq_timeout,
+            "WorkIQ MCP を登録 (stdio, package=%s) — timeout=%ds, max_retries=%d",
+            _WORKIQ_MCP_PACKAGE, workiq_timeout,
             workiq_max_retries,
         )
 
@@ -432,6 +436,29 @@ class CopilotClientWrapper:
             user_prompt,
             timeout=self._sdk_config.sdk_timeout,
             operation_name="機能B ブリーフィング生成",
+        )
+
+    async def generate_briefing_c(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        """機能 C（ページモニター）のブリーフィングを生成する。
+
+        ツール登録なし（取得済みのページコンテンツから要約するため）。
+
+        Args:
+            system_prompt: 機能 C 用のシステムプロンプト。
+            user_prompt: 機能 C 用のユーザープロンプト。
+
+        Returns:
+            生成されたブリーフィングテキスト。
+        """
+        return await self._send_prompt(
+            system_prompt,
+            user_prompt,
+            timeout=self._sdk_config.sdk_timeout,
+            operation_name="機能C ブリーフィング生成",
         )
 
     async def score_quiz(self, scoring_prompt: str) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from tkinter import filedialog, ttk
 from typing import Any, Callable
 
 from app import config as config_module
-from app.config import AppConfig, ScheduleEntry
+from app.config import AppConfig, MonitoredPage, ScheduleEntry
 from app.i18n import SUPPORTED_LANGUAGES, get_language, set_language, t
 from app.sample_data import generate_sample_data
 
@@ -136,8 +136,9 @@ def open_settings(
     try:
         root = tk.Tk()
         root.title(t("settings.title"))
-        root.geometry("650x600")
-        root.resizable(False, False)
+        root.geometry("650x750")
+        root.resizable(False, True)
+        root.minsize(650, 500)
 
         # ウィンドウアイコン設定
         _icon_path = Path(__file__).resolve().parent.parent / "assets" / "icon_normal.png"
@@ -167,9 +168,35 @@ def open_settings(
         lang_combo = ttk.Combobox(general_tab, textvariable=lang_var, values=lang_labels, state="readonly", width=20)
         lang_combo.pack(anchor=tk.W, pady=(0, 10))
 
-        # ─── タブ1: スケジュール ───
-        schedule_tab = ttk.Frame(notebook, padding=10)
-        notebook.add(schedule_tab, text=t("settings.tab.schedule"))
+        # ─── タブ1: スケジュール（スクロール対応） ───
+        schedule_outer = ttk.Frame(notebook)
+        notebook.add(schedule_outer, text=t("settings.tab.schedule"))
+
+        schedule_canvas = tk.Canvas(schedule_outer, highlightthickness=0)
+        schedule_scrollbar = ttk.Scrollbar(schedule_outer, orient=tk.VERTICAL, command=schedule_canvas.yview)
+        schedule_tab = ttk.Frame(schedule_canvas, padding=10)
+
+        schedule_tab.bind(
+            "<Configure>",
+            lambda e: schedule_canvas.configure(scrollregion=schedule_canvas.bbox("all")),
+        )
+        schedule_canvas.create_window((0, 0), window=schedule_tab, anchor="nw")
+        schedule_canvas.configure(yscrollcommand=schedule_scrollbar.set)
+
+        schedule_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        schedule_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # キャンバス幅を外枠に合わせる
+        def _on_canvas_configure(event: Any) -> None:
+            schedule_canvas.itemconfigure("all", width=event.width)
+
+        schedule_canvas.bind("<Configure>", _on_canvas_configure)
+
+        # マウスホイールスクロール対応
+        def _on_mousewheel(event: Any) -> None:
+            schedule_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        schedule_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # 機能 A スケジュール
         ttk.Label(schedule_tab, text=t("settings.feature_a_header"), font=("", 11, "bold")).pack(anchor=tk.W, pady=(0, 5))
@@ -272,6 +299,60 @@ def open_settings(
         b_hour_entry.pack(side=tk.LEFT)
         ttk.Label(b_hours_frame, text=t("settings.hour_hint"), foreground="gray").pack(side=tk.LEFT, padx=5)
 
+        # 機能 C スケジュール
+        ttk.Label(schedule_tab, text=t("settings.feature_c_header"), font=("", 11, "bold")).pack(anchor=tk.W, pady=(10, 5))
+
+        c_frame = ttk.LabelFrame(schedule_tab, text=t("settings.feature_c_schedule"), padding=8)
+        c_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 有効/無効チェックボックス（機能 C）
+        c_enabled_var = tk.BooleanVar(master=root, value=config.page_monitor.enabled)
+        ttk.Checkbutton(c_frame, text=t("settings.feature_c_enabled"), variable=c_enabled_var).pack(anchor=tk.W, pady=(0, 5))
+
+        # 曜日チェックボックス（機能 C）
+        ttk.Label(c_frame, text=t("settings.days_label")).pack(anchor=tk.W)
+        c_day_frame = ttk.Frame(c_frame)
+        c_day_frame.pack(anchor=tk.W, pady=3)
+
+        c_day_vars: dict[str, tk.BooleanVar] = {}
+        c_existing_days: list[str] = []
+        for entry in config.schedule.feature_c:
+            c_existing_days.extend(_parse_day_of_week(entry.day_of_week))
+        c_existing_days = list(set(c_existing_days))
+
+        for i18n_key, key in _WEEKDAY_KEYS:
+            var = tk.BooleanVar(master=root, value=key in c_existing_days)
+            c_day_vars[key] = var
+            ttk.Checkbutton(c_day_frame, text=t(i18n_key), variable=var).pack(side=tk.LEFT, padx=3)
+
+        # ショートカットボタン
+        c_shortcut_frame = ttk.Frame(c_frame)
+        c_shortcut_frame.pack(anchor=tk.W, pady=3)
+
+        def c_select_weekdays() -> None:
+            for d in ["mon", "tue", "wed", "thu", "fri"]:
+                c_day_vars[d].set(True)
+            for d in ["sat", "sun"]:
+                c_day_vars[d].set(False)
+
+        def c_select_everyday() -> None:
+            for var in c_day_vars.values():
+                var.set(True)
+
+        ttk.Button(c_shortcut_frame, text=t("settings.weekdays_only"), command=c_select_weekdays, width=10).pack(side=tk.LEFT, padx=3)
+        ttk.Button(c_shortcut_frame, text=t("settings.every_day"), command=c_select_everyday, width=10).pack(side=tk.LEFT, padx=3)
+
+        # 時刻選択（機能 C）
+        ttk.Label(c_frame, text=t("settings.hour_label")).pack(anchor=tk.W, pady=(5, 0))
+        c_hours_frame = ttk.Frame(c_frame)
+        c_hours_frame.pack(anchor=tk.W, pady=3)
+
+        c_existing_hours = [entry.hour for entry in config.schedule.feature_c]
+        c_hour_var = tk.StringVar(master=root, value=", ".join(c_existing_hours))
+        c_hour_entry = ttk.Entry(c_hours_frame, textvariable=c_hour_var, width=30)
+        c_hour_entry.pack(side=tk.LEFT)
+        ttk.Label(c_hours_frame, text=t("settings.hour_hint"), foreground="gray").pack(side=tk.LEFT, padx=5)
+
         # ─── タブ2: フォルダ ───
         folder_tab = ttk.Frame(notebook, padding=10)
         notebook.add(folder_tab, text=t("settings.tab.folders"))
@@ -342,7 +423,82 @@ def open_settings(
 
         ttk.Button(folder_btn_frame, text=t("sample.button_label"), command=create_sample, width=18).pack(side=tk.LEFT, padx=3)
 
-        # ─── タブ3: 通知 ───
+        # ─── タブ3: ページモニター ───
+        pm_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(pm_tab, text=t("settings.tab.page_monitor"))
+
+        ttk.Label(pm_tab, text=t("settings.page_monitor_header"), font=("", 11, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
+        # ページ一覧 Treeview
+        pm_tree_frame = ttk.Frame(pm_tab)
+        pm_tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        pm_columns = ("url", "name", "mode", "enabled")
+        pm_tree = ttk.Treeview(pm_tree_frame, columns=pm_columns, show="headings", height=8)
+        pm_tree.heading("url", text=t("settings.page_url_label"))
+        pm_tree.heading("name", text=t("settings.page_name_label"))
+        pm_tree.heading("mode", text=t("settings.page_mode_label"))
+        pm_tree.heading("enabled", text=t("settings.page_enabled"))
+        pm_tree.column("url", width=250)
+        pm_tree.column("name", width=180)
+        pm_tree.column("mode", width=60)
+        pm_tree.column("enabled", width=50)
+        pm_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        pm_scrollbar = ttk.Scrollbar(pm_tree_frame, orient=tk.VERTICAL, command=pm_tree.yview)
+        pm_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        pm_tree.config(yscrollcommand=pm_scrollbar.set)
+
+        # 既存ページを表示
+        for page in config.page_monitor.pages:
+            enabled_mark = "✓" if page.enabled else ""
+            pm_tree.insert("", tk.END, values=(page.url, page.name, page.mode, enabled_mark))
+
+        # ページ追加フレーム
+        pm_add_frame = ttk.LabelFrame(pm_tab, text=t("settings.page_add"), padding=8)
+        pm_add_frame.pack(fill=tk.X, pady=(10, 0))
+
+        url_input_frame = ttk.Frame(pm_add_frame)
+        url_input_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(url_input_frame, text=t("settings.page_url_label")).pack(side=tk.LEFT)
+        pm_url_var = tk.StringVar(master=root)
+        pm_url_entry = ttk.Entry(url_input_frame, textvariable=pm_url_var, width=50)
+        pm_url_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        pm_btn_frame = ttk.Frame(pm_add_frame)
+        pm_btn_frame.pack(fill=tk.X, pady=(5, 0))
+
+        def pm_add_page() -> None:
+            """URLを一覧に追加する。"""
+            url = pm_url_var.get().strip()
+            if not url:
+                return
+            # 重複チェック
+            for item in pm_tree.get_children():
+                if pm_tree.item(item, "values")[0] == url:
+                    return
+            pm_tree.insert("", tk.END, values=(url, "", "auto", "✓"))
+            pm_url_var.set("")
+
+        def pm_remove_page() -> None:
+            """選択中のページを削除する。"""
+            selected = pm_tree.selection()
+            for item in selected:
+                pm_tree.delete(item)
+
+        def pm_toggle_enabled() -> None:
+            """選択中のページの有効/無効を切り替える。"""
+            selected = pm_tree.selection()
+            for item in selected:
+                vals = list(pm_tree.item(item, "values"))
+                vals[3] = "" if vals[3] == "✓" else "✓"
+                pm_tree.item(item, values=vals)
+
+        ttk.Button(pm_btn_frame, text=t("settings.page_add"), command=pm_add_page, width=10).pack(side=tk.LEFT, padx=3)
+        ttk.Button(pm_btn_frame, text=t("settings.page_remove"), command=pm_remove_page, width=10).pack(side=tk.LEFT, padx=3)
+        ttk.Button(pm_btn_frame, text=t("settings.page_enabled"), command=pm_toggle_enabled, width=10).pack(side=tk.LEFT, padx=3)
+
+        # ─── タブ4: 通知 ───
         notif_tab = ttk.Frame(notebook, padding=10)
         notebook.add(notif_tab, text=t("settings.tab.notifications"))
 
@@ -392,6 +548,36 @@ def open_settings(
             config.schedule.feature_b = [
                 ScheduleEntry(day_of_week=b_day_str, hour=h) for h in b_hours
             ] if b_hours else [ScheduleEntry(day_of_week=b_day_str, hour="8")]
+
+            # スケジュール C
+            c_selected_days = [k for k, v in c_day_vars.items() if v.get()]
+            c_hours = [h.strip() for h in c_hour_var.get().split(",") if h.strip()]
+            c_day_str = _days_to_string(c_selected_days)
+
+            config.schedule.feature_c = [
+                ScheduleEntry(day_of_week=c_day_str, hour=h) for h in c_hours
+            ] if c_hours else [ScheduleEntry(day_of_week=c_day_str, hour="8")]
+
+            # ページモニター有効/無効
+            config.page_monitor.enabled = c_enabled_var.get()
+
+            # ページモニター URL 一覧
+            new_pages: list[MonitoredPage] = []
+            existing_map = {p.url: p for p in config.page_monitor.pages}
+            for item in pm_tree.get_children():
+                vals = pm_tree.item(item, "values")
+                url = str(vals[0])
+                # 既存ページの設定を引き継ぎ、新規はデフォルト
+                if url in existing_map:
+                    page = existing_map[url]
+                    page.enabled = str(vals[3]) == "✓"
+                    new_pages.append(page)
+                else:
+                    new_pages.append(MonitoredPage(
+                        url=url,
+                        enabled=str(vals[3]) == "✓",
+                    ))
+            config.page_monitor.pages = new_pages
 
             # フォルダ
             config.input_folders = list(folder_listbox.get(0, tk.END))

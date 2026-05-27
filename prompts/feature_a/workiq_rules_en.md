@@ -1,0 +1,4 @@
+- **When to use WorkIQ MCP**:
+  - Topics containing internal project names, customer names, or team names
+  - Searching for internal case studies, templates, or knowledge articles
+  - Checking internal announcements and discussions

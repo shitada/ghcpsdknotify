@@ -36,6 +36,7 @@ class ScheduleConfig:
 
     feature_a: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon-fri", hour="9")])
     feature_b: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon,wed,fri", hour="8")])
+    feature_c: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon-fri", hour="8")])
 
 
 @dataclass
@@ -95,6 +96,28 @@ class QuizConfig:
 
 
 @dataclass
+class MonitoredPage:
+    """監視対象ページの設定。"""
+
+    url: str = ""
+    name: str = ""
+    mode: str = "auto"  # "auto", "links", "content", "rss"
+    link_selector: str = ""
+    content_selector: str = ""
+    feed_url: str = ""
+    analyzed: bool = False
+    enabled: bool = True
+
+
+@dataclass
+class PageMonitorConfig:
+    """ページモニター設定。"""
+
+    enabled: bool = False
+    pages: list[MonitoredPage] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     """アプリケーション全体の設定。"""
 
@@ -107,6 +130,7 @@ class AppConfig:
     notification: NotificationConfig = field(default_factory=NotificationConfig)
     file_selection: FileSelectionConfig = field(default_factory=FileSelectionConfig)
     quiz: QuizConfig = field(default_factory=QuizConfig)
+    page_monitor: PageMonitorConfig = field(default_factory=PageMonitorConfig)
     language: str = "ja"
     log_level: str = "INFO"
 
@@ -124,9 +148,11 @@ def _dict_to_schedule_config(d: dict[str, Any]) -> ScheduleConfig:
     """辞書から ScheduleConfig を生成する。"""
     feature_a_raw = d.get("feature_a", [])
     feature_b_raw = d.get("feature_b", [])
+    feature_c_raw = d.get("feature_c", [])
     return ScheduleConfig(
         feature_a=[_dict_to_schedule_entry(e) for e in feature_a_raw] if feature_a_raw else [ScheduleEntry(day_of_week="mon-fri", hour="9")],
         feature_b=[_dict_to_schedule_entry(e) for e in feature_b_raw] if feature_b_raw else [ScheduleEntry(day_of_week="mon,wed,fri", hour="8")],
+        feature_c=[_dict_to_schedule_entry(e) for e in feature_c_raw] if feature_c_raw else [ScheduleEntry(day_of_week="mon-fri", hour="8")],
     )
 
 
@@ -187,6 +213,29 @@ def _dict_to_quiz_config(d: dict[str, Any]) -> QuizConfig:
     )
 
 
+def _dict_to_monitored_page(d: dict[str, Any]) -> MonitoredPage:
+    """辞書から MonitoredPage を生成する。"""
+    return MonitoredPage(
+        url=str(d.get("url", "")),
+        name=str(d.get("name", "")),
+        mode=str(d.get("mode", "auto")),
+        link_selector=str(d.get("link_selector", "")),
+        content_selector=str(d.get("content_selector", "")),
+        feed_url=str(d.get("feed_url", "")),
+        analyzed=bool(d.get("analyzed", False)),
+        enabled=bool(d.get("enabled", True)),
+    )
+
+
+def _dict_to_page_monitor_config(d: dict[str, Any]) -> PageMonitorConfig:
+    """辞書から PageMonitorConfig を生成する。"""
+    pages_raw = d.get("pages", [])
+    return PageMonitorConfig(
+        enabled=bool(d.get("enabled", False)),
+        pages=[_dict_to_monitored_page(p) for p in pages_raw] if isinstance(pages_raw, list) else [],
+    )
+
+
 def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
     """辞書から AppConfig を生成する。"""
     schedule_raw = d.get("schedule", {})
@@ -195,6 +244,7 @@ def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
     notif_raw = d.get("notification", {})
     fs_raw = d.get("file_selection", {})
     quiz_raw = d.get("quiz", {})
+    pm_raw = d.get("page_monitor", {})
 
     return AppConfig(
         input_folders=list(d.get("input_folders", [])),
@@ -206,6 +256,7 @@ def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
         notification=_dict_to_notification_config(notif_raw) if isinstance(notif_raw, dict) else NotificationConfig(),
         file_selection=_dict_to_file_selection_config(fs_raw) if isinstance(fs_raw, dict) else FileSelectionConfig(),
         quiz=_dict_to_quiz_config(quiz_raw) if isinstance(quiz_raw, dict) else QuizConfig(),
+        page_monitor=_dict_to_page_monitor_config(pm_raw) if isinstance(pm_raw, dict) else PageMonitorConfig(),
         language=str(d.get("language", "ja")),
         log_level=str(d.get("log_level", "INFO")),
     )
@@ -219,6 +270,7 @@ def _app_config_to_dict(config: AppConfig) -> dict[str, Any]:
         "schedule": {
             "feature_a": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_a],
             "feature_b": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_b],
+            "feature_c": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_c],
         },
         "target_extensions": config.target_extensions,
         "copilot_sdk": {
@@ -251,6 +303,22 @@ def _app_config_to_dict(config: AppConfig) -> dict[str, Any]:
                 "max_level": config.quiz.spaced_repetition.max_level,
                 "intervals": config.quiz.spaced_repetition.intervals,
             },
+        },
+        "page_monitor": {
+            "enabled": config.page_monitor.enabled,
+            "pages": [
+                {
+                    "url": p.url,
+                    "name": p.name,
+                    "mode": p.mode,
+                    "link_selector": p.link_selector,
+                    "content_selector": p.content_selector,
+                    "feed_url": p.feed_url,
+                    "analyzed": p.analyzed,
+                    "enabled": p.enabled,
+                }
+                for p in config.page_monitor.pages
+            ],
         },
         "language": config.language,
         "log_level": config.log_level,

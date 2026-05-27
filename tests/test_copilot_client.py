@@ -262,6 +262,7 @@ class TestGenerateBriefingA:
         call_kwargs = wrapper._send_prompt.call_args.kwargs
         mcp = call_kwargs["mcp_servers"]
         assert mcp["workiq"]["command"] == "npx.cmd"
+        assert mcp["workiq"]["args"] == ["-y", "@microsoft/workiq@0.2.8", "mcp"]
 
     async def test_workiq_enabled_uses_npx_on_non_windows(self, wrapper: CopilotClientWrapper):
         """非 Windows 環境では npx が MCP コマンドに設定される。"""
@@ -274,6 +275,7 @@ class TestGenerateBriefingA:
         call_kwargs = wrapper._send_prompt.call_args.kwargs
         mcp = call_kwargs["mcp_servers"]
         assert mcp["workiq"]["command"] == "npx"
+        assert mcp["workiq"]["args"] == ["-y", "@microsoft/workiq@0.2.8", "mcp"]
 
     async def test_workiq_fallback_on_timeout(self, wrapper: CopilotClientWrapper):
         """WorkIQ 付きがタイムアウトした場合、MCP なしでフォールバックする。"""
