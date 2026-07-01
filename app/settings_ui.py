@@ -13,6 +13,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any, Callable
 
+from app import autostart
 from app import config as config_module
 from app.config import AppConfig, MonitoredPage, ScheduleEntry
 from app.i18n import SUPPORTED_LANGUAGES, get_language, set_language, t
@@ -30,6 +31,7 @@ def _log_setting_changes(
     old_folders: list[str],
     old_notif_enabled: bool,
     old_notif_click: bool,
+    old_run_at_startup: bool,
 ) -> None:
     """変更された設定項目をログに記録する。"""
     changes: list[str] = []
@@ -53,6 +55,9 @@ def _log_setting_changes(
 
     if old_notif_click != config.notification.open_file_on_click:
         changes.append(f"notification.open_file_on_click: {old_notif_click} -> {config.notification.open_file_on_click}")
+
+    if old_run_at_startup != config.run_at_startup:
+        changes.append(f"run_at_startup: {old_run_at_startup} -> {config.run_at_startup}")
 
     if changes:
         for change in changes:
@@ -167,6 +172,22 @@ def open_settings(
         lang_var = tk.StringVar(master=root, value=lang_labels[current_lang_idx])
         lang_combo = ttk.Combobox(general_tab, textvariable=lang_var, values=lang_labels, state="readonly", width=20)
         lang_combo.pack(anchor=tk.W, pady=(0, 10))
+
+        # 自動起動（PC 起動時）
+        ttk.Separator(general_tab, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(5, 10))
+        ttk.Label(general_tab, text=t("settings.startup_header"), font=("", 11, "bold")).pack(anchor=tk.W, pady=(0, 5))
+
+        startup_var = tk.BooleanVar(master=root, value=config.run_at_startup)
+        ttk.Checkbutton(
+            general_tab,
+            text=t("settings.run_at_startup"),
+            variable=startup_var,
+        ).pack(anchor=tk.W, pady=3)
+        ttk.Label(
+            general_tab,
+            text=t("settings.run_at_startup_hint"),
+            foreground="gray",
+        ).pack(anchor=tk.W, padx=(20, 0))
 
         # ─── タブ1: スケジュール（スクロール対応） ───
         schedule_outer = ttk.Frame(notebook)
@@ -353,6 +374,60 @@ def open_settings(
         c_hour_entry.pack(side=tk.LEFT)
         ttk.Label(c_hours_frame, text=t("settings.hour_hint"), foreground="gray").pack(side=tk.LEFT, padx=5)
 
+        # 機能 D スケジュール
+        ttk.Label(schedule_tab, text=t("settings.feature_d_header"), font=("", 11, "bold")).pack(anchor=tk.W, pady=(10, 5))
+
+        d_frame = ttk.LabelFrame(schedule_tab, text=t("settings.feature_d_schedule"), padding=8)
+        d_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 有効/無効チェックボックス（機能 D）
+        d_enabled_var = tk.BooleanVar(master=root, value=config.feature_d.enabled)
+        ttk.Checkbutton(d_frame, text=t("settings.feature_d_enabled"), variable=d_enabled_var).pack(anchor=tk.W, pady=(0, 5))
+
+        # 曜日チェックボックス（機能 D）
+        ttk.Label(d_frame, text=t("settings.days_label")).pack(anchor=tk.W)
+        d_day_frame = ttk.Frame(d_frame)
+        d_day_frame.pack(anchor=tk.W, pady=3)
+
+        d_day_vars: dict[str, tk.BooleanVar] = {}
+        d_existing_days: list[str] = []
+        for entry in config.schedule.feature_d:
+            d_existing_days.extend(_parse_day_of_week(entry.day_of_week))
+        d_existing_days = list(set(d_existing_days))
+
+        for i18n_key, key in _WEEKDAY_KEYS:
+            var = tk.BooleanVar(master=root, value=key in d_existing_days)
+            d_day_vars[key] = var
+            ttk.Checkbutton(d_day_frame, text=t(i18n_key), variable=var).pack(side=tk.LEFT, padx=3)
+
+        # ショートカットボタン
+        d_shortcut_frame = ttk.Frame(d_frame)
+        d_shortcut_frame.pack(anchor=tk.W, pady=3)
+
+        def d_select_weekdays() -> None:
+            for d in ["mon", "tue", "wed", "thu", "fri"]:
+                d_day_vars[d].set(True)
+            for d in ["sat", "sun"]:
+                d_day_vars[d].set(False)
+
+        def d_select_everyday() -> None:
+            for var in d_day_vars.values():
+                var.set(True)
+
+        ttk.Button(d_shortcut_frame, text=t("settings.weekdays_only"), command=d_select_weekdays, width=10).pack(side=tk.LEFT, padx=3)
+        ttk.Button(d_shortcut_frame, text=t("settings.every_day"), command=d_select_everyday, width=10).pack(side=tk.LEFT, padx=3)
+
+        # 時刻選択（機能 D）
+        ttk.Label(d_frame, text=t("settings.hour_label")).pack(anchor=tk.W, pady=(5, 0))
+        d_hours_frame = ttk.Frame(d_frame)
+        d_hours_frame.pack(anchor=tk.W, pady=3)
+
+        d_existing_hours = [entry.hour for entry in config.schedule.feature_d]
+        d_hour_var = tk.StringVar(master=root, value=", ".join(d_existing_hours))
+        d_hour_entry = ttk.Entry(d_hours_frame, textvariable=d_hour_var, width=30)
+        d_hour_entry.pack(side=tk.LEFT)
+        ttk.Label(d_hours_frame, text=t("settings.hour_hint"), foreground="gray").pack(side=tk.LEFT, padx=5)
+
         # ─── タブ2: フォルダ ───
         folder_tab = ttk.Frame(notebook, padding=10)
         notebook.add(folder_tab, text=t("settings.tab.folders"))
@@ -530,6 +605,7 @@ def open_settings(
             old_folders = list(config.input_folders)
             old_notif_enabled = config.notification.enabled
             old_notif_click = config.notification.open_file_on_click
+            old_run_at_startup = config.run_at_startup
 
             # スケジュール A
             a_selected_days = [k for k, v in a_day_vars.items() if v.get()]
@@ -560,6 +636,18 @@ def open_settings(
 
             # ページモニター有効/無効
             config.page_monitor.enabled = c_enabled_var.get()
+
+            # スケジュール D
+            d_selected_days = [k for k, v in d_day_vars.items() if v.get()]
+            d_hours = [h.strip() for h in d_hour_var.get().split(",") if h.strip()]
+            d_day_str = _days_to_string(d_selected_days)
+
+            config.schedule.feature_d = [
+                ScheduleEntry(day_of_week=d_day_str, hour=h) for h in d_hours
+            ] if d_hours else [ScheduleEntry(day_of_week=d_day_str, hour="8")]
+
+            # 機能 D 有効/無効
+            config.feature_d.enabled = d_enabled_var.get()
 
             # ページモニター URL 一覧
             new_pages: list[MonitoredPage] = []
@@ -597,6 +685,15 @@ def open_settings(
 
             language_changed = old_language != config.language
 
+            # 自動起動（PC 起動時）
+            config.run_at_startup = startup_var.get()
+            if config.run_at_startup != old_run_at_startup:
+                if not autostart.set_enabled(config.run_at_startup):
+                    messagebox.showwarning(
+                        t("settings.startup_failed_title"),
+                        t("settings.startup_failed_message"),
+                    )
+
             # 変更内容をログに記録
             _log_setting_changes(
                 config,
@@ -606,6 +703,7 @@ def open_settings(
                 old_folders=old_folders,
                 old_notif_enabled=old_notif_enabled,
                 old_notif_click=old_notif_click,
+                old_run_at_startup=old_run_at_startup,
             )
 
             # config.yaml に保存

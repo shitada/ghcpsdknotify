@@ -37,6 +37,7 @@ class ScheduleConfig:
     feature_a: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon-fri", hour="9")])
     feature_b: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon,wed,fri", hour="8")])
     feature_c: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon-fri", hour="8")])
+    feature_d: list[ScheduleEntry] = field(default_factory=lambda: [ScheduleEntry(day_of_week="mon-fri", hour="8")])
 
 
 @dataclass
@@ -118,6 +119,13 @@ class PageMonitorConfig:
 
 
 @dataclass
+class FeatureDConfig:
+    """機能 D（ミーティング フォローアップ ダイジェスト）設定。"""
+
+    enabled: bool = False
+
+
+@dataclass
 class AppConfig:
     """アプリケーション全体の設定。"""
 
@@ -131,8 +139,10 @@ class AppConfig:
     file_selection: FileSelectionConfig = field(default_factory=FileSelectionConfig)
     quiz: QuizConfig = field(default_factory=QuizConfig)
     page_monitor: PageMonitorConfig = field(default_factory=PageMonitorConfig)
+    feature_d: FeatureDConfig = field(default_factory=FeatureDConfig)
     language: str = "ja"
     log_level: str = "INFO"
+    run_at_startup: bool = False
 
 
 def _dict_to_schedule_entry(d: dict[str, Any]) -> ScheduleEntry:
@@ -149,10 +159,12 @@ def _dict_to_schedule_config(d: dict[str, Any]) -> ScheduleConfig:
     feature_a_raw = d.get("feature_a", [])
     feature_b_raw = d.get("feature_b", [])
     feature_c_raw = d.get("feature_c", [])
+    feature_d_raw = d.get("feature_d", [])
     return ScheduleConfig(
         feature_a=[_dict_to_schedule_entry(e) for e in feature_a_raw] if feature_a_raw else [ScheduleEntry(day_of_week="mon-fri", hour="9")],
         feature_b=[_dict_to_schedule_entry(e) for e in feature_b_raw] if feature_b_raw else [ScheduleEntry(day_of_week="mon,wed,fri", hour="8")],
         feature_c=[_dict_to_schedule_entry(e) for e in feature_c_raw] if feature_c_raw else [ScheduleEntry(day_of_week="mon-fri", hour="8")],
+        feature_d=[_dict_to_schedule_entry(e) for e in feature_d_raw] if feature_d_raw else [ScheduleEntry(day_of_week="mon-fri", hour="8")],
     )
 
 
@@ -236,6 +248,13 @@ def _dict_to_page_monitor_config(d: dict[str, Any]) -> PageMonitorConfig:
     )
 
 
+def _dict_to_feature_d_config(d: dict[str, Any]) -> FeatureDConfig:
+    """辞書から FeatureDConfig を生成する。"""
+    return FeatureDConfig(
+        enabled=bool(d.get("enabled", False)),
+    )
+
+
 def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
     """辞書から AppConfig を生成する。"""
     schedule_raw = d.get("schedule", {})
@@ -245,6 +264,7 @@ def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
     fs_raw = d.get("file_selection", {})
     quiz_raw = d.get("quiz", {})
     pm_raw = d.get("page_monitor", {})
+    fd_raw = d.get("feature_d", {})
 
     return AppConfig(
         input_folders=list(d.get("input_folders", [])),
@@ -257,8 +277,10 @@ def _dict_to_app_config(d: dict[str, Any]) -> AppConfig:
         file_selection=_dict_to_file_selection_config(fs_raw) if isinstance(fs_raw, dict) else FileSelectionConfig(),
         quiz=_dict_to_quiz_config(quiz_raw) if isinstance(quiz_raw, dict) else QuizConfig(),
         page_monitor=_dict_to_page_monitor_config(pm_raw) if isinstance(pm_raw, dict) else PageMonitorConfig(),
+        feature_d=_dict_to_feature_d_config(fd_raw) if isinstance(fd_raw, dict) else FeatureDConfig(),
         language=str(d.get("language", "ja")),
         log_level=str(d.get("log_level", "INFO")),
+        run_at_startup=bool(d.get("run_at_startup", False)),
     )
 
 
@@ -271,6 +293,7 @@ def _app_config_to_dict(config: AppConfig) -> dict[str, Any]:
             "feature_a": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_a],
             "feature_b": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_b],
             "feature_c": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_c],
+            "feature_d": [{"day_of_week": e.day_of_week, "hour": e.hour} for e in config.schedule.feature_d],
         },
         "target_extensions": config.target_extensions,
         "copilot_sdk": {
@@ -320,8 +343,12 @@ def _app_config_to_dict(config: AppConfig) -> dict[str, Any]:
                 for p in config.page_monitor.pages
             ],
         },
+        "feature_d": {
+            "enabled": config.feature_d.enabled,
+        },
         "language": config.language,
         "log_level": config.log_level,
+        "run_at_startup": config.run_at_startup,
     }
 
 

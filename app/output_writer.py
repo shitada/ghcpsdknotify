@@ -131,6 +131,8 @@ def _generate_filename(feature: str, now: datetime | None = None) -> str:
         return f"briefing_quiz_{timestamp}.md"
     elif feature == "c":
         return f"briefing_monitor_{timestamp}.md"
+    elif feature == "d":
+        return f"briefing_meetings_{timestamp}.md"
     else:
         return f"briefing_{timestamp}.md"
 

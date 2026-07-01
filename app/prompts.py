@@ -111,6 +111,11 @@ def get_system_prompt_c() -> str:
     return load_prompt("feature_c", "system")
 
 
+def get_system_prompt_d() -> str:
+    """機能 D（ミーティング フォローアップ ダイジェスト）のシステムプロンプトを返す。"""
+    return load_prompt("feature_d", "system")
+
+
 def get_user_prompt_a() -> str:
     """機能 A のユーザープロンプトテンプレートを返す。"""
     return load_prompt("feature_a", "user")
@@ -119,6 +124,11 @@ def get_user_prompt_a() -> str:
 def get_user_prompt_b() -> str:
     """機能 B のユーザープロンプトテンプレートを返す。"""
     return load_prompt("feature_b", "user")
+
+
+def get_user_prompt_d() -> str:
+    """機能 D のユーザープロンプトテンプレートを返す。"""
+    return load_prompt("feature_d", "user")
 
 
 def get_discovery_appendix() -> str:

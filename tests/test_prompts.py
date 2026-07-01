@@ -11,8 +11,10 @@ from app.prompts import (
     get_system_prompt_a,
     get_system_prompt_b,
     get_system_prompt_c,
+    get_system_prompt_d,
     get_user_prompt_a,
     get_user_prompt_b,
+    get_user_prompt_d,
     load_prompt,
 )
 
@@ -47,6 +49,27 @@ class TestLoadPrompt:
         with patch("app.prompts.get_language", return_value="ja"):
             text = load_prompt("feature_c", "system")
             assert "モニター" in text
+
+    def test_loads_feature_d_prompt_ja(self):
+        with patch("app.prompts.get_language", return_value="ja"):
+            text = load_prompt("feature_d", "system")
+            assert "ミーティング" in text
+
+    def test_loads_feature_d_prompt_en(self):
+        with patch("app.prompts.get_language", return_value="en"):
+            text = load_prompt("feature_d", "system")
+            assert "Meeting" in text
+
+    def test_get_system_prompt_d(self):
+        with patch("app.prompts.get_language", return_value="ja"):
+            assert "ミーティング" in get_system_prompt_d()
+
+    def test_get_user_prompt_d_has_placeholders(self):
+        with patch("app.prompts.get_language", return_value="ja"):
+            text = get_user_prompt_d()
+            assert "{target_date}" in text
+            assert "{target_weekday}" in text
+            assert "{current_datetime}" in text
 
 
 # ────────────────────────────────────────────

@@ -333,3 +333,50 @@ class TestGenerateBriefingA:
         assert len(calls) == 2
         assert "WorkIQ" in calls[0]
         assert "フォールバック" in calls[1]
+
+
+# ────────────────────────────────────────────
+# generate_briefing_d (WorkIQ MCP 必須・フォールバックなし)
+# ────────────────────────────────────────────
+
+class TestGenerateBriefingD:
+    async def test_uses_workiq_mcp_on_windows(self, wrapper: CopilotClientWrapper):
+        """WorkIQ MCP が npx.cmd で登録される。"""
+        wrapper._send_prompt = AsyncMock(return_value="digest")
+        config = WorkIQMcpConfig(enabled=True)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            result = await wrapper.generate_briefing_d("sys", "user", config)
+        assert result == "digest"
+        mcp = wrapper._send_prompt.call_args.kwargs["mcp_servers"]
+        assert mcp["workiq"]["command"] == "npx.cmd"
+        assert mcp["workiq"]["args"] == ["-y", "@microsoft/workiq@0.2.8", "mcp"]
+
+    async def test_uses_dedicated_timeout_and_retries(self, wrapper: CopilotClientWrapper):
+        """WorkIQ の timeout / max_retries が使われる。"""
+        wrapper._send_prompt = AsyncMock(return_value="digest")
+        config = WorkIQMcpConfig(enabled=True, timeout=45, max_retries=2)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            await wrapper.generate_briefing_d("sys", "user", config)
+        call_kwargs = wrapper._send_prompt.call_args.kwargs
+        assert call_kwargs["timeout"] == 45
+        assert call_kwargs["max_retries"] == 2
+
+    async def test_no_fallback_reraises(self, wrapper: CopilotClientWrapper):
+        """失敗時はフォールバックせず例外を送出する（_send_prompt は1回のみ）。"""
+        calls = 0
+
+        async def side_effect(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise TimeoutError("timeout")
+
+        wrapper._send_prompt = AsyncMock(side_effect=side_effect)
+        config = WorkIQMcpConfig(enabled=True)
+        with patch("app.copilot_client.platform") as mock_platform:
+            mock_platform.system.return_value = "Windows"
+            with pytest.raises(Exception):
+                await wrapper.generate_briefing_d("sys", "user", config)
+        assert calls == 1
+

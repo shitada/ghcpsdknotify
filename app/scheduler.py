@@ -33,6 +33,7 @@ _MISFIRE_GRACE_TIME = 54000
 _JOB_A_PREFIX = "job_a"
 _JOB_B_PREFIX = "job_b"
 _JOB_C_PREFIX = "job_c"
+_JOB_D_PREFIX = "job_d"
 
 # スリープ復帰監視の間隔（秒）
 # Windows の WaitForSingleObjectEx はスリープ中の時間をカウントしないため、
@@ -70,12 +71,15 @@ class Scheduler:
         self._lock_a = threading.Lock()
         self._lock_b = threading.Lock()
         self._lock_c = threading.Lock()
+        self._lock_d = threading.Lock()
         self._running_a = False
         self._running_b = False
         self._running_c = False
+        self._running_d = False
         self._on_job_a: Callable[[], None] | None = None
         self._on_job_b: Callable[[], None] | None = None
         self._on_job_c: Callable[[], None] | None = None
+        self._on_job_d: Callable[[], None] | None = None
         self._started = False
         # スリープ復帰監視
         self._watchdog_stop = threading.Event()
@@ -88,20 +92,23 @@ class Scheduler:
         on_job_a: Callable[[], None],
         on_job_b: Callable[[], None],
         on_job_c: Callable[[], None] | None = None,
+        on_job_d: Callable[[], None] | None = None,
     ) -> None:
         """スケジューラを開始する。
 
-        config のスケジュール設定に基づき、機能 A・B・C のジョブを登録して開始する。
+        config のスケジュール設定に基づき、機能 A・B・C・D のジョブを登録して開始する。
 
         Args:
             config: アプリケーション設定。
             on_job_a: 機能 A のジョブコールバック。
             on_job_b: 機能 B のジョブコールバック。
             on_job_c: 機能 C のジョブコールバック。
+            on_job_d: 機能 D のジョブコールバック。
         """
         self._on_job_a = on_job_a
         self._on_job_b = on_job_b
         self._on_job_c = on_job_c
+        self._on_job_d = on_job_d
 
         # スケジュールジョブの登録
         self._register_jobs(config)
@@ -144,20 +151,23 @@ class Scheduler:
         on_job_a: Callable[[], None] | None = None,
         on_job_b: Callable[[], None] | None = None,
         on_job_c: Callable[[], None] | None = None,
+        on_job_d: Callable[[], None] | None = None,
     ) -> None:
         """指定機能を即座に手動実行する。
 
-        複数の場合は A → B → C の順で順次実行する。
+        複数の場合は A → B → C → D の順で順次実行する。
 
         Args:
-            features: 実行する機能のリスト（"a", "b", "c"）。
+            features: 実行する機能のリスト（"a", "b", "c", "d"）。
             on_job_a: 機能 A のコールバック（None の場合は登録済みを使用）。
             on_job_b: 機能 B のコールバック（None の場合は登録済みを使用）。
             on_job_c: 機能 C のコールバック（None の場合は登録済みを使用）。
+            on_job_d: 機能 D のコールバック（None の場合は登録済みを使用）。
         """
         job_a = on_job_a or self._on_job_a
         job_b = on_job_b or self._on_job_b
         job_c = on_job_c or self._on_job_c
+        job_d = on_job_d or self._on_job_d
 
         if "a" in features and job_a:
             logger.info("手動実行: 機能 A を開始")
@@ -170,6 +180,10 @@ class Scheduler:
         if "c" in features and job_c:
             logger.info("手動実行: 機能 C を開始")
             self._execute_job_c_wrapper(job_c)
+
+        if "d" in features and job_d:
+            logger.info("手動実行: 機能 D を開始")
+            self._execute_job_d_wrapper(job_d)
 
     def _register_jobs(self, config: AppConfig) -> None:
         """config のスケジュール設定に基づきジョブを登録する。"""
@@ -224,11 +238,33 @@ class Scheduler:
                 entry.hour,
             )
 
+        for i, entry in enumerate(config.schedule.feature_d):
+            job_id = f"{_JOB_D_PREFIX}_{i}"
+            trigger = self._create_trigger(entry)
+            self._scheduler.add_job(
+                self._on_trigger_d,
+                trigger=trigger,
+                id=job_id,
+                replace_existing=True,
+                name=f"機能D (schedule {i})",
+            )
+            logger.info(
+                "機能D ジョブ登録: %s (day_of_week=%s, hour=%s)",
+                job_id,
+                entry.day_of_week,
+                entry.hour,
+            )
+
     def _remove_all_jobs(self) -> None:
-        """登録済みの A/B/C ジョブをすべて削除する。"""
+        """登録済みの A/B/C/D ジョブをすべて削除する。"""
         jobs = self._scheduler.get_jobs()
         for job in jobs:
-            if job.id.startswith(_JOB_A_PREFIX) or job.id.startswith(_JOB_B_PREFIX) or job.id.startswith(_JOB_C_PREFIX):
+            if (
+                job.id.startswith(_JOB_A_PREFIX)
+                or job.id.startswith(_JOB_B_PREFIX)
+                or job.id.startswith(_JOB_C_PREFIX)
+                or job.id.startswith(_JOB_D_PREFIX)
+            ):
                 self._scheduler.remove_job(job.id)
                 logger.debug("ジョブ削除: %s", job.id)
 
@@ -374,6 +410,48 @@ class Scheduler:
         finally:
             self._lock_c.release()
 
+    def _on_trigger_d(self) -> None:
+        """機能 D のスケジュールトリガーハンドラ。
+
+        機能 A・B・C のいずれかが実行中の場合は 3 分後にリスケジュールする。
+        """
+        if self._running_a or self._running_b or self._running_c:
+            defer_time = datetime.now() + timedelta(seconds=_DEFER_SECONDS)
+            logger.info(
+                "機能 A/B/C が実行中のため、機能 D を %s に遅延実行します",
+                defer_time.strftime("%H:%M:%S"),
+            )
+            self._scheduler.add_job(
+                self._on_trigger_d,
+                trigger=DateTrigger(run_date=defer_time),
+                id="job_d_deferred",
+                replace_existing=True,
+                name="機能D (遅延実行)",
+            )
+            return
+
+        if self._on_job_d:
+            self._execute_job_d_wrapper(self._on_job_d)
+
+    def _execute_job_d_wrapper(self, callback: Callable[[], None]) -> None:
+        """機能 D のジョブを排他制御付きで実行する。
+
+        既に実行中の場合はスキップする（スリープ復帰時の二重起動防止）。
+        """
+        if not self._lock_d.acquire(blocking=False):
+            logger.warning("機能 D は既に実行中のためスキップします（二重起動防止）")
+            return
+        try:
+            self._running_d = True
+            try:
+                callback()
+            except Exception:
+                logger.exception("機能 D の実行中にエラーが発生しました")
+            finally:
+                self._running_d = False
+        finally:
+            self._lock_d.release()
+
     # ─── スリープ復帰監視（ウォッチドッグ） ───
 
     def set_on_sleep_wake(self, callback: Callable[[], None]) -> None:
@@ -432,8 +510,9 @@ class Scheduler:
         last_run_a_at: str,
         last_run_b_at: str,
         last_run_c_at: str = "",
+        last_run_d_at: str = "",
     ) -> None:
-        """起動時に見逃されたジョブをチェックし、misfire 猶予内であれば即実行する。
+        """起動時に見逃されたジョブをチェックし、misfire 猚予内であれば即実行する。
 
         PC スリープやアプリ未起動でスケジュール時刻を逃した場合に、
         起動後に自動で実行するためのメソッド。
@@ -443,6 +522,7 @@ class Scheduler:
             last_run_a_at: 機能 A の最終実行日時（ISO 形式）。空文字は未実行。
             last_run_b_at: 機能 B の最終実行日時（ISO 形式）。空文字は未実行。
             last_run_c_at: 機能 C の最終実行日時（ISO 形式）。空文字は未実行。
+            last_run_d_at: 機能 D の最終実行日時（ISO 形式）。空文字は未実行。
         """
         now = datetime.now()
         today = now.date()
@@ -484,9 +564,10 @@ class Scheduler:
             )
 
         # 機能 C のキャッチアップ（実行中の場合はスケジュール済みとみなしてスキップ）
-        if self._on_job_c and not self._running_c and _should_catchup(
+        c_has_catchup = self._on_job_c and not self._running_c and _should_catchup(
             config.schedule.feature_c, today_weekday, now, last_run_c_at,
-        ):
+        )
+        if c_has_catchup:
             # A/B のキャッチアップがある場合はさらに遅延して重複を回避
             prior_catchups = sum([bool(a_has_catchup), bool(b_has_catchup)])
             delay = (_DEFER_SECONDS * prior_catchups) + 10 if prior_catchups else 10
@@ -500,6 +581,25 @@ class Scheduler:
                 id="job_c_catchup",
                 replace_existing=True,
                 name="機能C (起動時キャッチアップ)",
+            )
+
+        # 機能 D のキャッチアップ（実行中の場合はスケジュール済みとみなしてスキップ）
+        if self._on_job_d and not self._running_d and _should_catchup(
+            config.schedule.feature_d, today_weekday, now, last_run_d_at,
+        ):
+            # A/B/C のキャッチアップがある場合はさらに遅延して重複を回避
+            prior_catchups = sum([bool(a_has_catchup), bool(b_has_catchup), bool(c_has_catchup)])
+            delay = (_DEFER_SECONDS * prior_catchups) + 10 if prior_catchups else 10
+            logger.info(
+                "起動時キャッチアップ: 機能 D のスケジュール時刻を逃しています。%d秒後に実行します",
+                delay,
+            )
+            self._scheduler.add_job(
+                self._on_trigger_d,
+                trigger=DateTrigger(run_date=now + timedelta(seconds=delay)),
+                id="job_d_catchup",
+                replace_existing=True,
+                name="機能D (起動時キャッチアップ)",
             )
 
 

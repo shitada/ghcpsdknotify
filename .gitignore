@@ -12,6 +12,10 @@ logs/
 settings/
 _briefings/
 
+# Security / analysis artifacts (contain local paths; do not push)
+codeql/
+test_out.txt
+
 # IDE
 .vscode/
 *.code-workspace

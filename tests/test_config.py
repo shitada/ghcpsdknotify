@@ -53,6 +53,42 @@ class TestDictRoundTrip:
         assert config.output_folder_name == "_briefings"
         assert config.copilot_sdk.model == "claude-sonnet-4.6"
 
+    def test_run_at_startup_default_false(self):
+        assert AppConfig().run_at_startup is False
+        assert _dict_to_app_config({}).run_at_startup is False
+
+    def test_run_at_startup_roundtrip(self):
+        config = AppConfig(run_at_startup=True)
+        d = _app_config_to_dict(config)
+        assert d["run_at_startup"] is True
+        restored = _dict_to_app_config(d)
+        assert restored.run_at_startup is True
+
+    def test_feature_d_default_disabled(self):
+        assert AppConfig().feature_d.enabled is False
+        assert _dict_to_app_config({}).feature_d.enabled is False
+
+    def test_feature_d_roundtrip(self):
+        config = AppConfig()
+        config.feature_d.enabled = True
+        d = _app_config_to_dict(config)
+        assert d["feature_d"]["enabled"] is True
+        restored = _dict_to_app_config(d)
+        assert restored.feature_d.enabled is True
+
+    def test_feature_d_schedule_default(self):
+        config = AppConfig()
+        assert config.schedule.feature_d[0].day_of_week == "mon-fri"
+        assert config.schedule.feature_d[0].hour == "8"
+
+    def test_feature_d_schedule_roundtrip(self):
+        config = AppConfig()
+        config.schedule.feature_d = [ScheduleEntry(day_of_week="mon,tue", hour="7")]
+        d = _app_config_to_dict(config)
+        restored = _dict_to_app_config(d)
+        assert restored.schedule.feature_d[0].day_of_week == "mon,tue"
+        assert restored.schedule.feature_d[0].hour == "7"
+
 
 # ────────────────────────────────────────────
 # load / save (ファイル I/O)
@@ -70,6 +106,13 @@ class TestLoadSave:
 
         assert loaded.input_folders == ["/test"]
         assert loaded.log_level == "WARNING"
+
+    def test_save_and_load_run_at_startup(self, tmp_path: Path):
+        config = AppConfig(run_at_startup=True)
+        path = tmp_path / "config.yaml"
+        save(config, path)
+        loaded = load(path)
+        assert loaded.run_at_startup is True
 
     def test_load_nonexistent_returns_default(self, tmp_path: Path):
         path = tmp_path / "nope.yaml"

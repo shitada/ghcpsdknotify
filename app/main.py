@@ -19,6 +19,7 @@ from PIL import Image
 # ── アセットフォルダ ──
 _ASSETS_DIR = _Path(__file__).resolve().parent.parent / "assets"
 
+from app import autostart
 from app import config as config_module
 from app.config import AppConfig
 from app.i18n import get_language, set_language, t
@@ -61,11 +62,16 @@ def _set_tray_processing(feature: str) -> None:
     アイコン色をオレンジに変更し、ツールチップを更新する。
 
     Args:
-        feature: "a"、"b"、または "c"。
+        feature: "a"、"b"、"c"、または "d"。
     """
     if _tray_icon is None:
         return
-    label_map = {"a": "tray.feature_a", "b": "tray.feature_b", "c": "tray.feature_c"}
+    label_map = {
+        "a": "tray.feature_a",
+        "b": "tray.feature_b",
+        "c": "tray.feature_c",
+        "d": "tray.feature_d",
+    }
     label = t(label_map.get(feature, "tray.feature_a"))
     _tray_icon.icon = _ICON_PROCESSING
     _tray_icon.title = t("tray.processing", label=label)
@@ -138,6 +144,24 @@ def _run_job_c() -> None:
     )
 
 
+def _run_job_d() -> None:
+    """機能 D（ミーティング フォローアップ ダイジェスト）のメイン処理。
+
+    feature_d モジュールへ委譲する。
+    """
+    assert _app_config is not None
+    assert _state_manager is not None
+
+    from app.feature_d import run as run_feature_d
+
+    run_feature_d(
+        config=_app_config,
+        state_manager=_state_manager,
+        on_tray_processing=lambda: _set_tray_processing("d"),
+        on_tray_normal=_set_tray_normal,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  システムトレイ（pystray）
 # ══════════════════════════════════════════════════════════════════════
@@ -192,6 +216,15 @@ def _create_tray_icon() -> pystray.Icon:
             daemon=True,
         ).start()
 
+    def on_manual_run_d(icon: pystray.Icon, item: Any) -> None:
+        """手動実行: 機能 D。"""
+        assert _scheduler is not None
+        threading.Thread(
+            target=_scheduler.run_manual,
+            args=(["d"],),
+            daemon=True,
+        ).start()
+
     def on_manual_run_both(icon: pystray.Icon, item: Any) -> None:
         """手動実行: A + B（順次）。"""
         assert _scheduler is not None
@@ -202,11 +235,11 @@ def _create_tray_icon() -> pystray.Icon:
         ).start()
 
     def on_manual_run_all(icon: pystray.Icon, item: Any) -> None:
-        """手動実行: A + B + C（順次）。"""
+        """手動実行: A + B + C + D（順次）。"""
         assert _scheduler is not None
         threading.Thread(
             target=_scheduler.run_manual,
-            args=(["a", "b", "c"],),
+            args=(["a", "b", "c", "d"],),
             daemon=True,
         ).start()
 
@@ -252,6 +285,7 @@ def _create_tray_icon() -> pystray.Icon:
                 pystray.MenuItem(t("tray.run_a_only"), on_manual_run_a),
                 pystray.MenuItem(t("tray.run_b_only"), on_manual_run_b),
                 pystray.MenuItem(t("tray.run_c_only"), on_manual_run_c),
+                pystray.MenuItem(t("tray.run_d_only"), on_manual_run_d),
                 pystray.MenuItem(t("tray.run_both"), on_manual_run_both),
                 pystray.MenuItem(t("tray.run_all"), on_manual_run_all),
             ),
@@ -304,6 +338,9 @@ def main() -> None:
         logger.info("Config loaded: language=%s, log_level=%s", _app_config.language, _app_config.log_level)
         set_language(_app_config.language)  # 言語設定を反映
 
+        # 2.5. スタートアップ自動起動の状態を config に合わせる（best-effort）
+        autostart.sync(_app_config.run_at_startup)
+
         # 3. setup_wizard 呼び出し
         if not run_wizard(_app_config):
             logger.info("セットアップウィザードが中断されました。終了します。")
@@ -320,6 +357,7 @@ def main() -> None:
             on_job_a=_run_job_a,
             on_job_b=_run_job_b,
             on_job_c=_run_job_c,
+            on_job_d=_run_job_d,
         )
 
         # 5.5. 起動時キャッチアップ（スリープ復帰・遅延起動対応）
@@ -328,6 +366,7 @@ def main() -> None:
             last_run_a_at=_state_manager.state.last_run_a_at,
             last_run_b_at=_state_manager.state.last_run_b_at,
             last_run_c_at=_state_manager.state.last_run_c_at,
+            last_run_d_at=_state_manager.state.last_run_d_at,
         )
 
         # 5.6. スリープ復帰時のキャッチアップコールバックを登録
@@ -339,6 +378,7 @@ def main() -> None:
                 last_run_a_at=_state_manager.state.last_run_a_at,
                 last_run_b_at=_state_manager.state.last_run_b_at,
                 last_run_c_at=_state_manager.state.last_run_c_at,
+                last_run_d_at=_state_manager.state.last_run_d_at,
             )
 
         _scheduler.set_on_sleep_wake(_on_sleep_wake)

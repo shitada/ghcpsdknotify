@@ -258,6 +258,9 @@ def notify_briefing(
     elif feature == "b":
         title = t("notify.title_quiz")
         message = t("notify.body_quiz")
+    elif feature == "d":
+        title = t("notify.title_meetings")
+        message = t("notify.body_meetings")
     else:
         title = t("notify.title_complete")
         message = t("notify.body_complete")
@@ -308,6 +311,9 @@ def notify_processing(
     elif feature == "b":
         title = t("notify.processing_quiz_title")
         message = t("notify.processing_quiz_body")
+    elif feature == "d":
+        title = t("notify.processing_meetings_title")
+        message = t("notify.processing_meetings_body")
     else:
         title = t("notify.processing_title")
         message = t("notify.processing_body")
@@ -352,6 +358,8 @@ def notify_error(
         label = t("notify.error_label_news")
     elif feature == "c":
         label = t("notify.error_label_monitor")
+    elif feature == "d":
+        label = t("notify.error_label_meetings")
     else:
         label = t("notify.error_label_quiz")
     title = t("notify.error_title", label=label)

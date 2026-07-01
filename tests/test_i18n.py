@@ -85,3 +85,30 @@ class TestSupportedLanguages:
     def test_supported_languages_contains_en(self):
         assert "en" in SUPPORTED_LANGUAGES
         assert SUPPORTED_LANGUAGES["en"] == "English"
+
+
+class TestStartupStrings:
+    """自動起動設定の文字列テスト。"""
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "settings.startup_header",
+            "settings.run_at_startup",
+            "settings.run_at_startup_hint",
+            "settings.startup_failed_title",
+            "settings.startup_failed_message",
+        ],
+    )
+    def test_startup_keys_exist_in_both_languages(self, key):
+        from app import i18n
+
+        assert key in i18n._STRINGS["ja"]
+        assert key in i18n._STRINGS["en"]
+
+    def test_run_at_startup_ja(self):
+        assert t("settings.run_at_startup") == "PC起動時に自動起動する"
+
+    def test_run_at_startup_en(self):
+        set_language("en")
+        assert t("settings.run_at_startup") == "Launch automatically at PC startup"

@@ -65,10 +65,12 @@ class AppState:
     run_count_a: int = 0
     run_count_b: int = 0
     run_count_c: int = 0
+    run_count_d: int = 0
     last_run_at: str = ""
     last_run_a_at: str = ""
     last_run_b_at: str = ""
     last_run_c_at: str = ""
+    last_run_d_at: str = ""
     output_folder_path: str = ""
     random_pick_history: list[str] = field(default_factory=list)
     pending_quizzes: list[PendingQuiz] = field(default_factory=list)
@@ -136,10 +138,12 @@ def _dict_to_app_state(d: dict[str, Any]) -> AppState:
         run_count_a=int(d.get("run_count_a", 0)),
         run_count_b=int(d.get("run_count_b", 0)),
         run_count_c=int(d.get("run_count_c", 0)),
+        run_count_d=int(d.get("run_count_d", 0)),
         last_run_at=str(d.get("last_run_at", "")),
         last_run_a_at=str(d.get("last_run_a_at", "")),
         last_run_b_at=str(d.get("last_run_b_at", "")),
         last_run_c_at=str(d.get("last_run_c_at", "")),
+        last_run_d_at=str(d.get("last_run_d_at", "")),
         output_folder_path=str(d.get("output_folder_path", "")),
         random_pick_history=list(d.get("random_pick_history", [])),
         pending_quizzes=[_dict_to_pending_quiz(p) for p in pending_raw] if isinstance(pending_raw, list) else [],
@@ -200,10 +204,12 @@ def _app_state_to_dict(state: AppState) -> dict[str, Any]:
         "run_count_a": state.run_count_a,
         "run_count_b": state.run_count_b,
         "run_count_c": state.run_count_c,
+        "run_count_d": state.run_count_d,
         "last_run_at": state.last_run_at,
         "last_run_a_at": state.last_run_a_at,
         "last_run_b_at": state.last_run_b_at,
         "last_run_c_at": state.last_run_c_at,
+        "last_run_d_at": state.last_run_d_at,
         "output_folder_path": state.output_folder_path,
         "random_pick_history": state.random_pick_history,
         "pending_quizzes": [_pending_quiz_to_dict(p) for p in state.pending_quizzes],
@@ -277,7 +283,7 @@ class StateManager:
         """実行カウンタをインクリメントする。
 
         Args:
-            feature: "a"、"b"、または "c"。
+            feature: "a"、"b"、"c"、または "d"。
         """
         if feature == "a":
             self._state.run_count_a += 1
@@ -288,8 +294,11 @@ class StateManager:
         elif feature == "c":
             self._state.run_count_c += 1
             logger.debug("run_count_c = %d", self._state.run_count_c)
+        elif feature == "d":
+            self._state.run_count_d += 1
+            logger.debug("run_count_d = %d", self._state.run_count_d)
         else:
-            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、または 'c' を指定）")
+            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、'c'、または 'd' を指定）")
 
     def update_last_run(self) -> None:
         """最終実行日時を現在時刻に更新する。"""
@@ -300,7 +309,7 @@ class StateManager:
         """機能別の最終実行日時を現在時刻に更新する。
 
         Args:
-            feature: "a"、"b"、または "c"。
+            feature: "a"、"b"、"c"、または "d"。
         """
         now_iso = datetime.now().isoformat(timespec="seconds")
         if feature == "a":
@@ -312,8 +321,11 @@ class StateManager:
         elif feature == "c":
             self._state.last_run_c_at = now_iso
             logger.debug("last_run_c_at = %s", now_iso)
+        elif feature == "d":
+            self._state.last_run_d_at = now_iso
+            logger.debug("last_run_d_at = %s", now_iso)
         else:
-            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、または 'c' を指定）")
+            raise ValueError(f"不正な feature 値: {feature!r} （'a'、'b'、'c'、または 'd' を指定）")
 
     def update_page_monitor_state(self, url: str, entry: PageMonitorEntry) -> None:
         """ページモニターの状態を更新する。

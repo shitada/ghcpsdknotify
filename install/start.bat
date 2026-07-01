@@ -13,6 +13,13 @@ setlocal EnableDelayedExpansion
 :: ================================================================
 
 set "PYTHONUTF8=1"
+
+:: Keep the virtual environment OUTSIDE OneDrive.
+:: OneDrive "Files On-Demand" can dehydrate .venv files into cloud-only
+:: reparse points, which makes `uv sync` fail with "Access is denied" and
+:: corrupts the environment. Placing the venv under %LOCALAPPDATA% avoids this.
+set "UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%\ghcpsdknotify\venv"
+
 :: Resolve project root (parent of install/)
 set "APP_DIR=%~dp0.."
 pushd "%APP_DIR%"

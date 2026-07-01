@@ -461,6 +461,58 @@ class CopilotClientWrapper:
             operation_name="機能C ブリーフィング生成",
         )
 
+    async def generate_briefing_d(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        workiq_config: WorkIQMcpConfig,
+    ) -> str:
+        """機能 D（ミーティング フォローアップ ダイジェスト）のレポートを生成する。
+
+        WorkIQ MCP を stdio MCP サーバーとして登録する（必須）。
+        機能 A と異なりフォールバックは行わない（WorkIQ なしでは成立しないため）。
+        失敗時は例外を送出し、呼び出し側でエラー通知を行う。
+
+        Args:
+            system_prompt: 機能 D 用のシステムプロンプト。
+            user_prompt: 機能 D 用のユーザープロンプト。
+            workiq_config: WorkIQ MCP サーバー設定。
+
+        Returns:
+            生成されたレポートテキスト。
+        """
+        # Windows では npx.cmd を指定しないとサブプロセスが解決できない
+        npx_cmd = "npx.cmd" if platform.system() == "Windows" else "npx"
+        mcp_servers: dict[str, Any] = {
+            "workiq": {
+                "type": "stdio",
+                "command": npx_cmd,
+                "args": ["-y", _WORKIQ_MCP_PACKAGE, "mcp"],
+                "tools": ["*"],
+            },
+        }
+        logger.info(
+            "WorkIQ MCP を登録 (stdio, package=%s) — timeout=%ds, max_retries=%d",
+            _WORKIQ_MCP_PACKAGE, workiq_config.timeout, workiq_config.max_retries,
+        )
+
+        try:
+            return await self._send_prompt(
+                system_prompt,
+                user_prompt,
+                timeout=workiq_config.timeout,
+                mcp_servers=mcp_servers,
+                operation_name="機能D ダイジェスト生成 (WorkIQ付き)",
+                max_retries=workiq_config.max_retries,
+            )
+        except (TimeoutError, Exception) as e:
+            logger.warning("WorkIQ MCP 付きの生成に失敗しました (%s)", e)
+            try:
+                _diagnose_workiq_failure()
+            except Exception as diag_err:
+                logger.debug("WorkIQ 診断でエラー: %s", diag_err)
+            raise
+
     async def score_quiz(self, scoring_prompt: str) -> dict[str, Any]:
         """クイズを採点する。
 

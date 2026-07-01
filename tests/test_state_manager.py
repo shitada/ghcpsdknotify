@@ -24,6 +24,8 @@ class TestDictRoundTrip:
         d = _app_state_to_dict(state)
         restored = _dict_to_app_state(d)
         assert restored.run_count_a == 0
+        assert restored.run_count_d == 0
+        assert restored.last_run_d_at == ""
         assert restored.quiz_history == {}
         assert restored.pending_quizzes == []
 
@@ -76,6 +78,16 @@ class TestStateManagerMutations:
         sm = self._make_sm()
         sm.increment_run_count("c")
         assert sm.state.run_count_c == 1
+
+    def test_increment_run_count_d(self):
+        sm = self._make_sm()
+        sm.increment_run_count("d")
+        assert sm.state.run_count_d == 1
+
+    def test_update_last_run_feature_d(self):
+        sm = self._make_sm()
+        sm.update_last_run_feature("d")
+        assert sm.state.last_run_d_at != ""
 
     def test_increment_invalid_feature_raises(self):
         sm = self._make_sm()
